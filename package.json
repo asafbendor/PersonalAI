@@ -1,0 +1,13 @@
+{
+  "name": "personalai-root",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=18.17.0"
+  },
+  "scripts": {
+    "build": "cd dashboard && npm install && npm run build",
+    "start": "cd dashboard && npm start",
+    "postinstall": "cd dashboard && npm install"
+  }
+}
