@@ -6,7 +6,22 @@
 
 body {
   direction: rtl;
+  text-align: right;
   font-family: 'Inter', system-ui, sans-serif;
+}
+
+* {
+  text-align: right;
+}
+
+input, textarea, select {
+  text-align: right;
+  direction: rtl;
+}
+
+.ltr, .ltr * {
+  direction: ltr;
+  text-align: left;
 }
 
 .ltr {
