@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { TOTAL_QUESTIONS } from '@/lib/questionnaire'
 
 interface CandidateMeta {
   slug: string
@@ -12,8 +13,6 @@ interface CandidateMeta {
   status: string
   answeredCount: number
 }
-
-const TOTAL_QUESTIONS = 39
 
 const STATUS_LABELS: Record<string, string> = {
   new: 'חדש',

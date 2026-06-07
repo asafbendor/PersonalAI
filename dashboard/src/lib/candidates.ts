@@ -7,7 +7,16 @@ const DATA_PATH = process.env.DATA_PATH
   ? path.resolve(process.cwd(), process.env.DATA_PATH)
   : path.resolve(process.cwd(), '..')
 
-const CANDIDATES_DIR = path.join(DATA_PATH, 'candidates')
+// Candidate answers are real user-submitted data and must survive redeploys.
+// On Railway, the regular app filesystem is wiped on every deploy, only a
+// mounted Volume persists. PERSISTENT_DATA_PATH should point at that volume's
+// mount path (e.g. "/data"). Locally (no volume), it falls back to the same
+// DATA_PATH used for personas/outputs, so dev keeps working unchanged.
+const PERSISTENT_DATA_PATH = process.env.PERSISTENT_DATA_PATH
+  ? path.resolve(process.env.PERSISTENT_DATA_PATH)
+  : DATA_PATH
+
+const CANDIDATES_DIR = path.join(PERSISTENT_DATA_PATH, 'candidates')
 
 export interface CandidateMeta {
   slug: string
