@@ -14,11 +14,11 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const { name, role, company, email, answers } = await req.json()
+    const { name, englishName, role, company, email, answers } = await req.json()
     if (!name || !answers) {
       return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
     }
-    const slug = saveCandidate({ name, role, company, email, answers })
+    const slug = saveCandidate({ name, englishName, role, company, email, answers })
     return NextResponse.json({ success: true, slug })
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 })

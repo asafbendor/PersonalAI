@@ -3,9 +3,10 @@ import { getCandidateFull } from '@/lib/candidates'
 import { generatePersonaDraft } from '@/lib/claude'
 
 // Generates a first-draft persona profile.md from a candidate's questionnaire
-// answers, for the admin to review, edit, and save manually as
-// personas/[slug]/profile.md (same human-reviewed flow as the existing personas).
-// This endpoint does NOT write any files, it only returns a draft for review.
+// answers, for the admin to review and edit before turning it into a real
+// persona. This endpoint does NOT write any files, it only returns a draft for
+// review, the admin then clicks "Save as Persona" (save-persona route) which
+// writes it and completes the flow, no manual file or git steps anywhere.
 export async function POST(_req: Request, { params }: { params: { slug: string } }) {
   try {
     const candidate = getCandidateFull(params.slug)

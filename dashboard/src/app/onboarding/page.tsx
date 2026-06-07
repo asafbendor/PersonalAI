@@ -7,6 +7,7 @@ import { QUESTIONNAIRE_SECTIONS as SECTIONS, TOTAL_QUESTIONS } from '@/lib/quest
 export default function OnboardingPage() {
   const [step, setStep] = useState(0)
   const [name, setName] = useState('')
+  const [englishName, setEnglishName] = useState('')
   const [role, setRole] = useState('')
   const [company, setCompany] = useState('')
   const [email, setEmail] = useState('')
@@ -29,6 +30,10 @@ export default function OnboardingPage() {
       setError('נא למלא שם לפני שממשיכים')
       return
     }
+    if (step === 0 && !englishName.trim()) {
+      setError('נא למלא שם באנגלית לפני שממשיכים, הוא משמש ליצירת קישור נקי במערכת')
+      return
+    }
     setStep((s) => Math.min(s + 1, lastStep))
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -45,7 +50,7 @@ export default function OnboardingPage() {
       const res = await fetch('/api/candidates', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, role, company, email, answers }),
+        body: JSON.stringify({ name, englishName, role, company, email, answers }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'שגיאה בשמירה')
@@ -118,6 +123,22 @@ export default function OnboardingPage() {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none"
                   placeholder="לדוגמה: דנה כהן"
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  שם באנגלית (אותיות לטיניות) *
+                </label>
+                <input
+                  type="text"
+                  value={englishName}
+                  onChange={(e) => setEnglishName(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none ltr text-left"
+                  placeholder="For example: Dana Cohen"
+                  dir="ltr"
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  משמש ליצירת קישור נקי לפרופיל שלך במערכת (כמו example.com/dana-cohen)
+                </p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">תפקיד</label>

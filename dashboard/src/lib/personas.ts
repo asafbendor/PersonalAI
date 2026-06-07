@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import matter from 'gray-matter'
+import { buildSlug, ensureUniqueSlug } from './slug'
 
 const DATA_PATH = process.env.DATA_PATH
   ? path.resolve(process.cwd(), process.env.DATA_PATH)
@@ -8,6 +9,27 @@ const DATA_PATH = process.env.DATA_PATH
 
 const PERSONAS_DIR = path.join(DATA_PATH, 'personas')
 const OUTPUTS_DIR = path.join(DATA_PATH, 'outputs')
+
+// Personas created at runtime (e.g. from a candidate's questionnaire via the
+// "Save as Persona" flow) cannot be written into PERSONAS_DIR, that path comes
+// from the deployed git checkout and gets wiped on every Railway redeploy.
+// Instead they're written under the same persistent volume used for candidate
+// answers (PERSISTENT_DATA_PATH, falls back to DATA_PATH locally), and read
+// back by merging both locations. The 3 original hand-built personas live in
+// PERSONAS_DIR (curated, git-tracked); anything created via the app lives here.
+const PERSISTENT_DATA_PATH = process.env.PERSISTENT_DATA_PATH
+  ? path.resolve(process.env.PERSISTENT_DATA_PATH)
+  : DATA_PATH
+const RUNTIME_PERSONAS_DIR = path.join(PERSISTENT_DATA_PATH, 'personas')
+
+// Resolve which directory actually holds a given persona's profile.md,
+// checking the curated git-tracked location first, then the runtime one.
+function personaDirFor(slug: string): string | null {
+  for (const dir of [PERSONAS_DIR, RUNTIME_PERSONAS_DIR]) {
+    if (fs.existsSync(path.join(dir, slug, 'profile.md'))) return path.join(dir, slug)
+  }
+  return null
+}
 
 export interface PersonaMeta {
   slug: string
@@ -41,21 +63,25 @@ export interface Post {
 }
 
 function getPersonaSlugs(): string[] {
-  if (!fs.existsSync(PERSONAS_DIR)) return []
-  return fs.readdirSync(PERSONAS_DIR).filter((d) => {
-    return fs.statSync(path.join(PERSONAS_DIR, d)).isDirectory()
-  })
+  const slugs = new Set<string>()
+  for (const dir of [PERSONAS_DIR, RUNTIME_PERSONAS_DIR]) {
+    if (!fs.existsSync(dir)) continue
+    fs.readdirSync(dir).forEach((d) => {
+      if (fs.statSync(path.join(dir, d)).isDirectory()) slugs.add(d)
+    })
+  }
+  return Array.from(slugs)
 }
 
 function parseProfile(slug: string): PersonaMeta | null {
-  const profilePath = path.join(PERSONAS_DIR, slug, 'profile.md')
-  if (!fs.existsSync(profilePath)) return null
+  const personaDir = personaDirFor(slug)
+  if (!personaDir) return null
+  const profilePath = path.join(personaDir, 'profile.md')
 
   const raw = fs.readFileSync(profilePath, 'utf-8')
   const { data, content } = matter(raw)
 
   // Find image
-  const personaDir = path.join(PERSONAS_DIR, slug)
   const files = fs.readdirSync(personaDir)
   const imgFile = files.find((f) => /\.(png|jpg|jpeg|webp)$/i.test(f))
   const videoFile = files.find((f) => /\.(mp4|mov|webm)$/i.test(f))
@@ -95,11 +121,11 @@ export function getPersonaFull(slug: string): PersonaFull | null {
   const meta = parseProfile(slug)
   if (!meta) return null
 
-  const profilePath = path.join(PERSONAS_DIR, slug, 'profile.md')
-  const { content } = matter(fs.readFileSync(profilePath, 'utf-8'))
+  const personaDir = personaDirFor(slug)!
+  const { content } = matter(fs.readFileSync(path.join(personaDir, 'profile.md'), 'utf-8'))
 
   // Read samples
-  const samplesDir = path.join(PERSONAS_DIR, slug, 'samples')
+  const samplesDir = path.join(personaDir, 'samples')
   const samples: { filename: string; content: string }[] = []
   if (fs.existsSync(samplesDir)) {
     fs.readdirSync(samplesDir)
@@ -161,9 +187,9 @@ export function getPersonaPosts(slug: string): Post[] {
 }
 
 export function getProfileRawContent(slug: string): string {
-  const profilePath = path.join(PERSONAS_DIR, slug, 'profile.md')
-  if (!fs.existsSync(profilePath)) return ''
-  const { content } = matter(fs.readFileSync(profilePath, 'utf-8'))
+  const personaDir = personaDirFor(slug)
+  if (!personaDir) return ''
+  const { content } = matter(fs.readFileSync(path.join(personaDir, 'profile.md'), 'utf-8'))
   return content
 }
 
@@ -174,15 +200,47 @@ export function savePost(personaSlug: string, filename: string, content: string)
 }
 
 export function getImagePath(slug: string, filename: string): string | null {
-  const imgPath = path.join(PERSONAS_DIR, slug, filename)
+  const personaDir = personaDirFor(slug)
+  if (!personaDir) return null
+  const imgPath = path.join(personaDir, filename)
   return fs.existsSync(imgPath) ? imgPath : null
 }
 
 export function getVideoPath(slug: string): { path: string; filename: string } | null {
-  const personaDir = path.join(PERSONAS_DIR, slug)
-  if (!fs.existsSync(personaDir)) return null
+  const personaDir = personaDirFor(slug)
+  if (!personaDir) return null
   const files = fs.readdirSync(personaDir)
   const videoFile = files.find((f) => /\.(mp4|mov|webm)$/i.test(f))
   if (!videoFile) return null
   return { path: path.join(personaDir, videoFile), filename: videoFile }
+}
+
+function personaSlugExists(slug: string): boolean {
+  return [PERSONAS_DIR, RUNTIME_PERSONAS_DIR].some((dir) =>
+    fs.existsSync(path.join(dir, slug))
+  )
+}
+
+// Creates a brand-new persona at runtime from an (admin-reviewed, possibly
+// edited) draft profile.md, typically generated from a candidate's
+// questionnaire answers via the in-app "Save as Persona" flow. Written under
+// the persistent volume (RUNTIME_PERSONAS_DIR) so it survives redeploys and is
+// immediately usable for post generation, exactly like the curated personas.
+//
+// The slug is derived here (not passed in) so this is the one place that
+// decides persona slugs and guarantees uniqueness against BOTH curated and
+// runtime personas. Prefers a Latin "english name" hint (e.g. the candidate's
+// englishName) over the display name, for the same reason candidate slugs do,
+// Hebrew text must never end up in a slug.
+export function createPersonaFromDraft(
+  name: string,
+  englishNameHint: string | undefined,
+  profileMarkdown: string
+): string {
+  const baseSlug = buildSlug(name, englishNameHint, 'persona')
+  const slug = ensureUniqueSlug(baseSlug, personaSlugExists)
+  const personaDir = path.join(RUNTIME_PERSONAS_DIR, slug)
+  fs.mkdirSync(personaDir, { recursive: true })
+  fs.writeFileSync(path.join(personaDir, 'profile.md'), profileMarkdown, 'utf-8')
+  return slug
 }

@@ -35,6 +35,10 @@ export default function CandidateDetailPage() {
   const [draftError, setDraftError] = useState('')
   const [copied, setCopied] = useState(false)
 
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
+  const [savedSlug, setSavedSlug] = useState<string | null>(null)
+
   useEffect(() => {
     if (!slug) return
     fetch(`/api/candidates/${slug}`)
@@ -66,6 +70,8 @@ export default function CandidateDetailPage() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'שגיאה ביצירת הטיוטה')
       setDraft(data.draft)
+      setSavedSlug(null)
+      setSaveError('')
     } catch (e) {
       setDraftError(String(e))
     } finally {
@@ -78,6 +84,27 @@ export default function CandidateDetailPage() {
     await navigator.clipboard.writeText(draft)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  const savePersona = async () => {
+    if (!draft) return
+    setSaving(true)
+    setSaveError('')
+    try {
+      const res = await fetch(`/api/candidates/${slug}/save-persona`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profileMarkdown: draft }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'שגיאה בשמירת הפרסונה')
+      setSavedSlug(data.slug)
+      if (candidate) setCandidate({ ...candidate, status: 'persona-created' })
+    } catch (e) {
+      setSaveError(String(e))
+    } finally {
+      setSaving(false)
+    }
   }
 
   if (loading) return <p className="text-gray-400">טוען...</p>
@@ -124,13 +151,12 @@ export default function CandidateDetailPage() {
       <div className="bg-white rounded-2xl border border-gray-100 p-6 mb-6">
         <div className="flex items-start justify-between flex-wrap gap-3 mb-2">
           <div>
-            <h2 className="text-lg font-bold">✨ טיוטת פרסונה</h2>
+            <h2 className="text-lg font-bold">✨ יצירת פרסונה מהמועמד/ת</h2>
             <p className="text-sm text-gray-500 mt-1">
-              יצירת טיוטה ראשונה של פרופיל פרסונה (profile.md) על בסיס תשובות המועמד/ת,
-              באותו מבנה של הפרסונות הקיימות. זו טיוטה לעיון ועריכה, לא קובץ סופי,
-              את/ה צריך/ה לקרוא, לתקן מה שצריך, ולשמור אותה כקובץ
-              <code className="mx-1 bg-gray-100 px-1.5 py-0.5 rounded text-xs">personas/{slug}/profile.md</code>
-              בדיוק כמו שנוצרו שלוש הפרסונות הקיימות.
+              שני שלבים: קודם יוצרים טיוטת פרופיל ראשונית על בסיס תשובות המועמד/ת
+              (באותו מבנה של הפרסונות הקיימות), קוראים אותה ומתקנים מה שצריך,
+              ואז לוחצים "שמור כפרסונה" והיא הופכת מיד לפרסונה פעילה במערכת,
+              עם עמוד משלה וזמינה ליצירת פוסטים. הכל בתוך האפליקציה, בלי לגעת בקבצים.
             </p>
           </div>
           <button
@@ -138,7 +164,7 @@ export default function CandidateDetailPage() {
             disabled={generating || candidate.answeredCount === 0}
             className="bg-brand-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-700 transition-colors disabled:opacity-50 whitespace-nowrap"
           >
-            {generating ? 'יוצר טיוטה...' : draft ? 'צור טיוטה מחדש' : 'צור טיוטת פרסונה'}
+            {generating ? 'יוצר טיוטה...' : draft ? 'צור טיוטה מחדש' : 'שלב 1: צור טיוטת פרסונה'}
           </button>
         </div>
 
@@ -147,17 +173,43 @@ export default function CandidateDetailPage() {
         )}
         {draftError && <p className="text-red-600 text-sm">{draftError}</p>}
 
-        {draft && (
+        {savedSlug && (
+          <div className="mt-2 bg-green-50 border border-green-200 rounded-xl p-4 flex items-center justify-between flex-wrap gap-3">
+            <p className="text-green-800 text-sm">
+              ✅ הפרסונה נוצרה ונשמרה במערכת, היא זמינה עכשיו לכתיבת תוכן בשמה.
+            </p>
+            <Link
+              href={`/ambassador/${savedSlug}`}
+              className="text-sm bg-green-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-green-700 transition-colors whitespace-nowrap"
+            >
+              צפייה בעמוד הפרסונה ←
+            </Link>
+          </div>
+        )}
+
+        {draft && !savedSlug && (
           <div className="mt-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-gray-500">אפשר לערוך כאן ישירות לפני העתקה ושמירה:</span>
-              <button
-                onClick={copyDraft}
-                className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors"
-              >
-                {copied ? '✓ הועתק' : 'העתק'}
-              </button>
+            <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+              <span className="text-sm text-gray-500">
+                שלב 2: אפשר לקרוא ולערוך כאן ישירות, ואז לשמור כפרסונה:
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={copyDraft}
+                  className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors"
+                >
+                  {copied ? '✓ הועתק' : 'העתק'}
+                </button>
+                <button
+                  onClick={savePersona}
+                  disabled={saving}
+                  className="text-sm px-4 py-1.5 rounded-lg bg-green-600 text-white font-medium hover:bg-green-700 transition-colors disabled:opacity-50 whitespace-nowrap"
+                >
+                  {saving ? 'שומר...' : '💾 שמור כפרסונה'}
+                </button>
+              </div>
             </div>
+            {saveError && <p className="text-red-600 text-sm mb-2">{saveError}</p>}
             <textarea
               value={draft}
               onChange={(e) => setDraft(e.target.value)}

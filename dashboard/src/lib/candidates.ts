@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import matter from 'gray-matter'
 import { QUESTIONNAIRE_SECTIONS, TOTAL_QUESTIONS } from './questionnaire'
+import { buildSlug, ensureUniqueSlug } from './slug'
 
 const DATA_PATH = process.env.DATA_PATH
   ? path.resolve(process.cwd(), process.env.DATA_PATH)
@@ -21,6 +22,7 @@ const CANDIDATES_DIR = path.join(PERSISTENT_DATA_PATH, 'candidates')
 export interface CandidateMeta {
   slug: string
   name: string
+  englishName: string
   role: string
   company: string
   submittedAt: string
@@ -30,26 +32,6 @@ export interface CandidateMeta {
 
 export interface CandidateFull extends CandidateMeta {
   answers: Record<string, string>
-}
-
-function slugify(input: string): string {
-  return input
-    .trim()
-    .toLowerCase()
-    .replace(/[^\w֐-׿\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .slice(0, 50) || 'candidate'
-}
-
-function ensureUniqueSlug(base: string): string {
-  if (!fs.existsSync(CANDIDATES_DIR)) return base
-  let slug = base
-  let i = 2
-  while (fs.existsSync(path.join(CANDIDATES_DIR, slug))) {
-    slug = `${base}-${i}`
-    i++
-  }
-  return slug
 }
 
 function getCandidateSlugs(): string[] {
@@ -80,6 +62,7 @@ function parseCandidate(slug: string): CandidateFull | null {
   return {
     slug,
     name: data.name || slug,
+    englishName: data['english-name'] || '',
     role: data.role || '',
     company: data.company || '',
     submittedAt: data['submitted-at'] || '',
@@ -96,6 +79,7 @@ export function getAllCandidates(): CandidateMeta[] {
     .map((c) => ({
       slug: c.slug,
       name: c.name,
+      englishName: c.englishName,
       role: c.role,
       company: c.company,
       submittedAt: c.submittedAt,
@@ -111,6 +95,7 @@ export function getCandidateFull(slug: string): CandidateFull | null {
 
 export function saveCandidate(input: {
   name: string
+  englishName?: string
   role?: string
   company?: string
   email?: string
@@ -118,8 +103,8 @@ export function saveCandidate(input: {
 }): string {
   if (!fs.existsSync(CANDIDATES_DIR)) fs.mkdirSync(CANDIDATES_DIR, { recursive: true })
 
-  const baseSlug = slugify(input.name)
-  const slug = ensureUniqueSlug(baseSlug)
+  const baseSlug = buildSlug(input.name, input.englishName, 'candidate')
+  const slug = ensureUniqueSlug(baseSlug, (s) => fs.existsSync(path.join(CANDIDATES_DIR, s)))
   const candidateDir = path.join(CANDIDATES_DIR, slug)
   fs.mkdirSync(candidateDir, { recursive: true })
 
@@ -129,6 +114,7 @@ export function saveCandidate(input: {
   const frontmatter = [
     '---',
     `name: "${input.name.replace(/"/g, '\\"')}"`,
+    `english-name: "${(input.englishName || '').replace(/"/g, '\\"')}"`,
     `role: "${(input.role || '').replace(/"/g, '\\"')}"`,
     `company: "${(input.company || '').replace(/"/g, '\\"')}"`,
     `email: "${(input.email || '').replace(/"/g, '\\"')}"`,
