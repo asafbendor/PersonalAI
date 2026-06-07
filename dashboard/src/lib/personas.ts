@@ -43,6 +43,12 @@ export interface PersonaMeta {
   imagePath: string | null
   hasVideo: boolean
   postCount: number
+  // True for personas created at runtime via the app (e.g. "Save as Persona"
+  // from a candidate). Only these can be edited, have their photo uploaded, or
+  // be deleted from the UI, the 3 curated personas ship with the git checkout
+  // and any in-app changes to them would be silently discarded on the next
+  // redeploy (and could strip them from version control unexpectedly).
+  isRuntime: boolean
 }
 
 export interface PersonaFull extends PersonaMeta {
@@ -60,6 +66,17 @@ export interface Post {
   goal: string
   status: string
   content: string
+}
+
+// True only for personas that live exclusively in the runtime/volume-backed
+// directory, i.e. were created via the app and not part of the curated git
+// checkout (even if a curated persona of the same slug somehow also existed,
+// we treat that as curated-owned and don't allow in-app mutation of it).
+function isRuntimePersona(slug: string): boolean {
+  return (
+    fs.existsSync(path.join(RUNTIME_PERSONAS_DIR, slug, 'profile.md')) &&
+    !fs.existsSync(path.join(PERSONAS_DIR, slug, 'profile.md'))
+  )
 }
 
 function getPersonaSlugs(): string[] {
@@ -108,6 +125,7 @@ function parseProfile(slug: string): PersonaMeta | null {
     imagePath: imgFile ? `/api/image/${slug}/${imgFile}` : null,
     hasVideo: !!videoFile,
     postCount,
+    isRuntime: isRuntimePersona(slug),
   }
 }
 
@@ -243,4 +261,41 @@ export function createPersonaFromDraft(
   fs.mkdirSync(personaDir, { recursive: true })
   fs.writeFileSync(path.join(personaDir, 'profile.md'), profileMarkdown, 'utf-8')
   return slug
+}
+
+// Overwrites profile.md for a persona created via the app. Restricted to
+// runtime personas, see isRuntimePersona() for why curated ones are excluded.
+// Returns false (and writes nothing) if the persona isn't a runtime persona.
+export function updatePersonaProfile(slug: string, profileMarkdown: string): boolean {
+  if (!isRuntimePersona(slug)) return false
+  const personaDir = path.join(RUNTIME_PERSONAS_DIR, slug)
+  fs.writeFileSync(path.join(personaDir, 'profile.md'), profileMarkdown, 'utf-8')
+  return true
+}
+
+// Saves an admin-uploaded photo for a persona created via the app. Replaces
+// any existing profile photo (a persona has exactly one). Restricted to
+// runtime personas for the same reason as updatePersonaProfile, the curated
+// personas already ship with their photos as part of the git checkout.
+export function savePersonaImage(slug: string, filename: string, buffer: Buffer): boolean {
+  if (!isRuntimePersona(slug)) return false
+  const personaDir = path.join(RUNTIME_PERSONAS_DIR, slug)
+  fs.readdirSync(personaDir)
+    .filter((f) => /\.(png|jpg|jpeg|webp)$/i.test(f))
+    .forEach((f) => fs.unlinkSync(path.join(personaDir, f)))
+  fs.writeFileSync(path.join(personaDir, filename), buffer)
+  return true
+}
+
+// Permanently removes a persona created via the app, including its profile,
+// photo, samples, everything under its directory in the persistent volume.
+// Restricted to runtime personas, deleting a curated persona's directory would
+// only be temporary (restored from git on next redeploy) and confusing.
+// Generated posts under outputs/[slug]/ are intentionally left untouched, they
+// are a record of what was published and stay even if the persona is removed.
+export function deletePersona(slug: string): boolean {
+  if (!isRuntimePersona(slug)) return false
+  const personaDir = path.join(RUNTIME_PERSONAS_DIR, slug)
+  fs.rmSync(personaDir, { recursive: true, force: true })
+  return true
 }

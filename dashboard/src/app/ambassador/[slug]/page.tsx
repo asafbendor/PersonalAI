@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useParams } from 'next/navigation'
+import { useEffect, useRef, useState } from 'react'
+import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import ReactMarkdown from 'react-markdown'
 
@@ -27,6 +27,7 @@ interface PersonaFull {
   imagePath: string | null
   hasVideo: boolean
   postCount: number
+  isRuntime: boolean
   profileContent: string
   samples: { filename: string; content: string }[]
 }
@@ -41,6 +42,7 @@ const statusColors: Record<string, string> = {
 
 export default function AmbassadorPage() {
   const params = useParams()
+  const router = useRouter()
   const slug = params.slug as string
 
   const [persona, setPersona] = useState<PersonaFull | null>(null)
@@ -49,8 +51,24 @@ export default function AmbassadorPage() {
   const [copiedSlug, setCopiedSlug] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    Promise.all([
+  // Delete persona
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+
+  // Edit profile
+  const [editingProfile, setEditingProfile] = useState(false)
+  const [profileDraft, setProfileDraft] = useState('')
+  const [savingProfile, setSavingProfile] = useState(false)
+  const [profileSaveError, setProfileSaveError] = useState('')
+
+  // Photo upload
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [uploadingImage, setUploadingImage] = useState(false)
+  const [imageUploadError, setImageUploadError] = useState('')
+
+  const loadPersona = () => {
+    return Promise.all([
       fetch(`/api/personas/${slug}`).then((r) => r.json()),
       fetch(`/api/posts/${slug}`).then((r) => r.json()),
     ]).then(([p, posts]) => {
@@ -58,12 +76,80 @@ export default function AmbassadorPage() {
       setPosts(Array.isArray(posts) ? posts : [])
       setLoading(false)
     })
+  }
+
+  useEffect(() => {
+    loadPersona()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug])
 
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text)
     setCopiedSlug(id)
     setTimeout(() => setCopiedSlug(null), 2000)
+  }
+
+  const startEditingProfile = () => {
+    if (!persona) return
+    setProfileDraft(persona.profileContent)
+    setProfileSaveError('')
+    setEditingProfile(true)
+  }
+
+  const saveProfile = async () => {
+    setSavingProfile(true)
+    setProfileSaveError('')
+    try {
+      const res = await fetch(`/api/personas/${slug}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profileMarkdown: profileDraft }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'שגיאה בשמירת הפרופיל')
+      setEditingProfile(false)
+      await loadPersona()
+    } catch (e) {
+      setProfileSaveError(String(e))
+    } finally {
+      setSavingProfile(false)
+    }
+  }
+
+  const deletePersona = async () => {
+    setDeleting(true)
+    setDeleteError('')
+    try {
+      const res = await fetch(`/api/personas/${slug}`, { method: 'DELETE' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'שגיאה במחיקת הפרסונה')
+      router.push('/')
+    } catch (e) {
+      setDeleteError(String(e))
+      setDeleting(false)
+    }
+  }
+
+  const onPickImage = () => fileInputRef.current?.click()
+
+  const onImageSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploadingImage(true)
+    setImageUploadError('')
+    try {
+      const formData = new FormData()
+      formData.append('image', file)
+      const res = await fetch(`/api/personas/${slug}/image`, { method: 'POST', body: formData })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'שגיאה בהעלאת התמונה')
+      await loadPersona()
+    } catch (e) {
+      setImageUploadError(String(e))
+    } finally {
+      setUploadingImage(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
   }
 
   if (loading) return <div className="text-center py-20 text-gray-400">טוען...</div>
@@ -87,11 +173,29 @@ export default function AmbassadorPage() {
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
         <div className="flex flex-col md:flex-row">
           {/* Photo */}
-          <div className="w-full md:w-56 h-56 shrink-0 bg-gray-100">
+          <div className="w-full md:w-56 h-56 shrink-0 bg-gray-100 relative group">
             {persona.imagePath ? (
               <img src={persona.imagePath} alt={persona.name} className="w-full h-full object-cover" />
             ) : (
               <div className="w-full h-full flex items-center justify-center text-5xl text-gray-200">👤</div>
+            )}
+            {persona.isRuntime && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  onChange={onImageSelected}
+                />
+                <button
+                  onClick={onPickImage}
+                  disabled={uploadingImage}
+                  className="absolute bottom-2 inset-x-2 bg-black/60 text-white text-xs py-1.5 rounded-lg hover:bg-black/75 transition-colors disabled:opacity-50"
+                >
+                  {uploadingImage ? 'מעלה תמונה...' : '📷 העלה / החלף תמונה'}
+                </button>
+              </>
             )}
           </div>
 
@@ -103,13 +207,24 @@ export default function AmbassadorPage() {
                 <p className="text-gray-600 mt-0.5">{persona.role}</p>
                 <p className="text-gray-400 text-sm">{persona.company}</p>
               </div>
-              <Link
-                href={`/generate?personas=${slug}`}
-                className="bg-brand-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-700 transition-colors"
-              >
-                + יצירת פוסט
-              </Link>
+              <div className="flex items-center gap-2">
+                <Link
+                  href={`/generate?personas=${slug}`}
+                  className="bg-brand-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-700 transition-colors"
+                >
+                  + יצירת פוסט
+                </Link>
+                {persona.isRuntime && (
+                  <button
+                    onClick={() => setConfirmingDelete(true)}
+                    className="text-sm px-3 py-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors"
+                  >
+                    🗑 מחק פרסונה
+                  </button>
+                )}
+              </div>
             </div>
+            {imageUploadError && <p className="text-red-600 text-xs mt-2">{imageUploadError}</p>}
 
             {persona.personalityWords && (
               <div className="mt-4">
@@ -126,6 +241,34 @@ export default function AmbassadorPage() {
           </div>
         </div>
       </div>
+
+      {/* Delete confirmation */}
+      {confirmingDelete && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-5 mb-6">
+          <p className="text-red-800 font-medium mb-1">למחוק את {persona.name} לצמיתות?</p>
+          <p className="text-red-700 text-sm mb-4">
+            הפעולה תמחק את הפרופיל, התמונה והדוגמאות של הפרסונה מהמערכת ולא ניתנת לביטול.
+            הפוסטים שכבר נכתבו בשמה יישארו כתיעוד, אך הפרסונה עצמה לא תהיה זמינה עוד ליצירת תוכן חדש.
+          </p>
+          {deleteError && <p className="text-red-600 text-sm mb-3">{deleteError}</p>}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={deletePersona}
+              disabled={deleting}
+              className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-700 transition-colors disabled:opacity-50"
+            >
+              {deleting ? 'מוחק...' : 'כן, מחק לצמיתות'}
+            </button>
+            <button
+              onClick={() => { setConfirmingDelete(false); setDeleteError('') }}
+              disabled={deleting}
+              className="px-4 py-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors text-sm"
+            >
+              ביטול
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-gray-200 mb-6">
@@ -202,9 +345,58 @@ export default function AmbassadorPage() {
       {/* Profile tab */}
       {activeTab === 'profile' && (
         <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <div className="prose prose-sm max-w-none text-gray-700 ltr" dir="rtl">
-            <ReactMarkdown>{persona.profileContent}</ReactMarkdown>
-          </div>
+          {persona.isRuntime ? (
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-sm text-gray-400">
+                {editingProfile ? 'עריכת הפרופיל, השינויים יישמרו במערכת מיד עם השמירה' : 'אפשר לערוך את הפרופיל ישירות מכאן'}
+              </span>
+              {!editingProfile ? (
+                <button
+                  onClick={startEditingProfile}
+                  className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors"
+                >
+                  ✏️ ערוך פרופיל
+                </button>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => { setEditingProfile(false); setProfileSaveError('') }}
+                    disabled={savingProfile}
+                    className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                  >
+                    ביטול
+                  </button>
+                  <button
+                    onClick={saveProfile}
+                    disabled={savingProfile}
+                    className="text-sm px-4 py-1.5 rounded-lg bg-brand-600 text-white font-medium hover:bg-brand-700 transition-colors disabled:opacity-50"
+                  >
+                    {savingProfile ? 'שומר...' : '💾 שמור שינויים'}
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-xs text-gray-400 mb-4">
+              פרסונה זו מנוהלת דרך הקוד (git), עריכה ישירה אינה זמינה דרך המערכת.
+            </p>
+          )}
+
+          {profileSaveError && <p className="text-red-600 text-sm mb-3">{profileSaveError}</p>}
+
+          {editingProfile ? (
+            <textarea
+              value={profileDraft}
+              onChange={(e) => setProfileDraft(e.target.value)}
+              rows={26}
+              dir="ltr"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 font-mono text-sm leading-relaxed resize-y outline-none focus:ring-2 focus:ring-brand-500"
+            />
+          ) : (
+            <div className="prose prose-sm max-w-none text-gray-700 ltr" dir="rtl">
+              <ReactMarkdown>{persona.profileContent}</ReactMarkdown>
+            </div>
+          )}
         </div>
       )}
 
