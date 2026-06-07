@@ -36,7 +36,13 @@ export function middleware(request: NextRequest) {
     return NextResponse.json({ error: 'נדרשת התחברות' }, { status: 401 })
   }
 
-  const loginUrl = new URL('/login', request.url)
+  // Build the redirect from nextUrl (resolved via forwarded-host headers), not request.url.
+  // Behind Railway's reverse proxy, request.url can resolve to the app's internal address
+  // (e.g. http://localhost:8080/...), which would send the browser to an unreachable host
+  // and look exactly like the site being blocked.
+  const loginUrl = request.nextUrl.clone()
+  loginUrl.pathname = '/login'
+  loginUrl.search = ''
   loginUrl.searchParams.set('redirect', pathname)
   return NextResponse.redirect(loginUrl)
 }
