@@ -14,12 +14,26 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <a href="/" className="text-xl font-bold text-brand-700">
             🏛️ פרויקט שגרירים
           </a>
-          <a
-            href="/generate"
-            className="bg-brand-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-700 transition-colors"
-          >
-            + יצירת פוסט
-          </a>
+          <div className="flex items-center gap-3">
+            <a
+              href="/candidates"
+              className="text-gray-600 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-100 transition-colors"
+            >
+              מועמדים
+            </a>
+            <a
+              href="/onboarding"
+              className="text-gray-600 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-100 transition-colors"
+            >
+              שאלון הכרות
+            </a>
+            <a
+              href="/generate"
+              className="bg-brand-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-700 transition-colors"
+            >
+              + יצירת פוסט
+            </a>
+          </div>
         </nav>
         <main className="max-w-6xl mx-auto px-6 py-8">{children}</main>
       </body>
