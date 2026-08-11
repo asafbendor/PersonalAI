@@ -1,5 +1,6 @@
 import { getAllPersonas } from '@/lib/personas'
 import StorageWarning from '@/components/StorageWarning'
+import BackupPanel from '@/components/BackupPanel'
 import Link from 'next/link'
 
 const statusLabel: Record<string, { label: string; color: string }> = {
@@ -24,6 +25,8 @@ export default function Home() {
           <span>{totalPosts} פוסטים סה"כ</span>
         </div>
       </div>
+
+      <BackupPanel />
 
       {/* Analytics bar */}
       <div className="bg-white rounded-xl border border-gray-200 p-5 mb-8">
