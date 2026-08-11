@@ -1,7 +1,11 @@
 'use client'
 
 import { useState } from 'react'
-import { QUESTIONNAIRE_SECTIONS as SECTIONS, TOTAL_QUESTIONS } from '@/lib/questionnaire'
+import {
+  QUESTIONNAIRE_SECTIONS as SECTIONS,
+  TOTAL_QUESTIONS,
+  type QuestionnaireQuestion as Question,
+} from '@/lib/questionnaire'
 
 // step 0 = intro/basic info, steps 1..N = sections, last step = review
 // Rendered by page.tsx only when storage is healthy, see the note there.
@@ -13,6 +17,8 @@ export default function OnboardingForm() {
   const [company, setCompany] = useState('')
   const [email, setEmail] = useState('')
   const [answers, setAnswers] = useState<Record<string, string>>({})
+  const [choices, setChoices] = useState<Record<string, string[]>>({})
+  const [details, setDetails] = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState<string | null>(null)
   const [error, setError] = useState('')
@@ -22,6 +28,52 @@ export default function OnboardingForm() {
 
   const setAnswer = (id: string, value: string) =>
     setAnswers((prev) => ({ ...prev, [id]: value }))
+
+  // Choice questions keep their selections and their optional detail text in
+  // separate state, then compose into the single string stored per question id.
+  // Everything downstream (storage, review page, persona draft) keeps seeing a
+  // plain string and needs no knowledge that choices exist.
+  const compose = (selected: string[], detail: string) => {
+    const head = selected.join(', ')
+    const tail = detail.trim()
+    if (head && tail) return `${head}\n\n${tail}`
+    return head || tail
+  }
+
+  const isSelected = (id: string, option: string) => (choices[id] ?? []).includes(option)
+
+  const showDetail = (q: Question) => {
+    const selected = choices[q.id] ?? []
+    if (!q.detailPrompt || selected.length === 0) return false
+    if (!q.detailWhen) return true
+    return selected.some((s) => q.detailWhen!.includes(s))
+  }
+
+  const applyChoice = (q: Question, selected: string[], detail: string) => {
+    setChoices((prev) => ({ ...prev, [q.id]: selected }))
+    setDetails((prev) => ({ ...prev, [q.id]: detail }))
+    setAnswer(q.id, compose(selected, detail))
+  }
+
+  const toggleOption = (q: Question, option: string) => {
+    const current = choices[q.id] ?? []
+    const next =
+      q.kind === 'multi'
+        ? current.includes(option)
+          ? current.filter((o) => o !== option)
+          : [...current, option]
+        : current.includes(option)
+        ? []
+        : [option]
+
+    // Dropping the trigger option should drop the now-irrelevant detail too,
+    // otherwise a stale "כן" explanation survives under a "לא" answer.
+    const keepDetail = next.length > 0 && (!q.detailWhen || next.some((s) => q.detailWhen!.includes(s)))
+    applyChoice(q, next, keepDetail ? details[q.id] ?? '' : '')
+  }
+
+  const setDetail = (q: Question, value: string) =>
+    applyChoice(q, choices[q.id] ?? [], value)
 
   const answeredCount = Object.values(answers).filter((a) => a && a.trim().length > 0).length
 
@@ -193,13 +245,51 @@ export default function OnboardingForm() {
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                           {idx + 1}. {q.text}
                         </label>
-                        <textarea
-                          value={answers[q.id] || ''}
-                          onChange={(e) => setAnswer(q.id, e.target.value)}
-                          rows={3}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none resize-y"
-                          placeholder="אפשר לכתוב כאן בחופשיות, אין תשובה נכונה..."
-                        />
+
+                        {q.kind === 'choice' || q.kind === 'multi' ? (
+                          <>
+                            <div className="flex flex-wrap gap-2 mt-2">
+                              {(q.options ?? []).map((option) => {
+                                const on = isSelected(q.id, option)
+                                return (
+                                  <button
+                                    type="button"
+                                    key={option}
+                                    onClick={() => toggleOption(q, option)}
+                                    className={`text-sm px-3 py-1.5 rounded-full border transition-colors ${
+                                      on
+                                        ? 'bg-brand-600 text-white border-brand-600'
+                                        : 'bg-white text-gray-600 border-gray-300 hover:border-brand-300'
+                                    }`}
+                                  >
+                                    {on ? '✓ ' : ''}
+                                    {option}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                            {q.kind === 'multi' && (
+                              <p className="text-xs text-gray-400 mt-1">אפשר לבחור יותר מאחד</p>
+                            )}
+                            {showDetail(q) && (
+                              <textarea
+                                value={details[q.id] || ''}
+                                onChange={(e) => setDetail(q, e.target.value)}
+                                rows={2}
+                                className="w-full mt-2 border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none resize-y"
+                                placeholder={q.detailPrompt || 'אפשר להוסיף כאן, לא חובה'}
+                              />
+                            )}
+                          </>
+                        ) : (
+                          <textarea
+                            value={answers[q.id] || ''}
+                            onChange={(e) => setAnswer(q.id, e.target.value)}
+                            rows={3}
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none resize-y"
+                            placeholder="אפשר לכתוב כאן בחופשיות, אין תשובה נכונה..."
+                          />
+                        )}
                       </div>
                     ))}
                   </div>
@@ -242,13 +332,15 @@ export default function OnboardingForm() {
                 )
               })}
             </ul>
-            <button
-              onClick={handleSubmit}
-              disabled={submitting}
-              className="w-full bg-brand-600 text-white py-3 rounded-lg font-medium hover:bg-brand-700 transition-colors disabled:opacity-50"
-            >
-              {submitting ? 'בשליחה...' : 'שליחת התשובות'}
-            </button>
+            <div className="flex justify-center">
+              <button
+                onClick={handleSubmit}
+                disabled={submitting}
+                className="text-center bg-brand-600 text-white px-10 py-3 rounded-lg font-medium shadow-sm hover:bg-brand-700 transition-colors disabled:opacity-50"
+              >
+                {submitting ? 'בשליחה...' : 'שליחת התשובות'}
+              </button>
+            </div>
           </div>
         )}
 

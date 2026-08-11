@@ -24,9 +24,32 @@
 //   q40 who is your target audience   it is whoever follows them, individually
 //   q42 what should the photo convey  decided per post by the operator
 
+// 'text'   free writing, the default and still the majority
+// 'choice'  pick one
+// 'multi'   pick any number
+//
+// Choice questions exist to lower the cost of answering, not to collect less.
+// Anything whose honest answer is "no" or a single word was forcing people to
+// type at exactly the point in the form where they were most worn out. The
+// options carry the answer, and an optional detail box keeps the door open for
+// whoever wants to elaborate.
+//
+// Answers are still stored as a single plain string per question id, so the
+// review page, the persona-draft prompt and the stored .md format all keep
+// working unchanged. Selections are joined with ", " and any detail follows
+// after a blank line.
+export type QuestionKind = 'text' | 'choice' | 'multi'
+
 export interface QuestionnaireQuestion {
   id: string
   text: string
+  kind?: QuestionKind
+  options?: string[]
+  // Label for the optional free-text box shown under the options
+  detailPrompt?: string
+  // Show the detail box only when one of these options is selected.
+  // Omit to always show it once anything is selected.
+  detailWhen?: string[]
 }
 
 export interface QuestionnaireSection {
@@ -56,7 +79,14 @@ export const QUESTIONNAIRE_SECTIONS: QuestionnaireSection[] = [
     title: 'דוגמאות כתיבה',
     description: 'החומר הכי חשוב בשאלון',
     questions: [
-      { id: 'q31', text: 'את/ה פעיל/ה ברשתות חברתיות? באילו (לינקדאין, פייסבוק, אינסטגרם, אחר)?' },
+      {
+        id: 'q31',
+        text: 'את/ה פעיל/ה ברשתות חברתיות? באילו?',
+        kind: 'multi',
+        options: ['לינקדאין', 'פייסבוק', 'אינסטגרם', 'טיקטוק', 'X (טוויטר)', 'אחר', 'לא פעיל/ה ברשתות'],
+        detailPrompt: 'אם סימנת "אחר", או שיש משהו להוסיף:',
+        detailWhen: ['אחר'],
+      },
       { id: 'q32', text: 'אם יש לך טקסטים שכתבת בעבר, בכל מקום שהוא (פוסט, תגובה ארוכה, הודעת וואטסאפ, מייל לצוות), תוכל/י להדביק כאן 2-3 מהם? לא צריך שיהיו "טובים" או קשורים לעבודה, רק שתכתוב/י אותם בעצמך. זה החומר שהכי עוזר לנו לזהות איך את/ה נשמע/ת.' },
       { id: 'q8', text: 'תכתוב/י כאן פסקה (3-5 משפטים) על משהו שקרה לך השבוע בעבודה, בדיוק כמו שהיית מספר/ת את זה לחבר/ה.' },
     ],
@@ -66,11 +96,31 @@ export const QUESTIONNAIRE_SECTIONS: QuestionnaireSection[] = [
     title: 'איך את/ה מדבר/ת וכותב/ת',
     description: 'ביטויים, הומור, אימוג׳ים',
     questions: [
-      { id: 'q10', text: "את/ה משתמש/ת באימוג'ים? באילו הקשרים? אילו אימוג'ים חוזרים אצלך?" },
+      {
+        id: 'q10',
+        text: "את/ה משתמש/ת באימוג'ים?",
+        kind: 'choice',
+        options: ['הרבה', 'לפעמים', 'כמעט אף פעם', 'בכלל לא'],
+        detailPrompt: "אילו אימוג'ים חוזרים אצלך, ובאילו הקשרים?",
+        detailWhen: ['הרבה', 'לפעמים', 'כמעט אף פעם'],
+      },
       { id: 'q12', text: 'יש לך ביטויים, מילות סלנג, או "תגיות" שחוזרות אצלך כל הזמן (גם כאלה שאת/ה אומר/ת בלי לשים לב)?' },
       { id: 'q13', text: 'יש מילה או ביטוי "מקצועי" שאת/ה שומע/ת כל הזמן ומגלגל/ת עיניים ממנו? (למשל "סינרגיה", "שובר שוק", "מצוינות תפעולית")' },
-      { id: 'q14', text: 'כשמשהו מצחיק אותך, איך זה בא לידי ביטוי בכתיבה שלך? את/ה כותב/ת בהומור, בציניות, בפשטות?' },
-      { id: 'q16', text: 'כשאת/ה מסביר/ה משהו מורכב למישהו, את/ה מתחיל/ה מדוגמה, מהתמונה הגדולה, מהפרטים הקטנים, או משהו אחר?' },
+      {
+        id: 'q14',
+        text: 'כשמשהו מצחיק אותך, איך זה בא לידי ביטוי בכתיבה שלך?',
+        kind: 'choice',
+        options: ['בהומור גלוי', 'בציניות', 'בפשטות, בלי הומור', 'תלוי בהקשר'],
+        detailPrompt: 'אפשר להוסיף דוגמה, אם עולה משהו:',
+      },
+      {
+        id: 'q16',
+        text: 'כשאת/ה מסביר/ה משהו מורכב למישהו, ממה את/ה מתחיל/ה?',
+        kind: 'choice',
+        options: ['מדוגמה', 'מהתמונה הגדולה', 'מהפרטים הקטנים', 'משהו אחר'],
+        detailPrompt: 'אם בחרת "משהו אחר", ממה?',
+        detailWhen: ['משהו אחר'],
+      },
     ],
   },
   {
@@ -102,11 +152,39 @@ export const QUESTIONNAIRE_SECTIONS: QuestionnaireSection[] = [
     title: 'גבולות ואישור',
     description: 'מה מותר ומה אסור לכתוב בשמך',
     questions: [
-      { id: 'q35', text: 'יש נושאים, מילים, או ניסוחים שלא היית רוצה לעולם שייכתבו בשמך, גם אם הם "נשמעים טוב"?' },
-      { id: 'q36', text: 'יש משהו אישי שלך שלא היית רוצה שיוזכר בפוסטים בשמך?' },
-      { id: 'q37', text: 'יש נושאים רגישים בעבודה שלך (פוליטיים, ארגוניים, אישיים) שהיית רוצה שנימנע מהם לגמרי?' },
+      {
+        id: 'q35',
+        text: 'יש נושאים, מילים, או ניסוחים שלא היית רוצה לעולם שייכתבו בשמך, גם אם הם "נשמעים טוב"?',
+        kind: 'choice',
+        options: ['לא', 'כן'],
+        detailPrompt: 'מה לא לכתוב בשמך?',
+        detailWhen: ['כן'],
+      },
+      {
+        id: 'q36',
+        text: 'יש משהו אישי שלך שלא היית רוצה שיוזכר בפוסטים בשמך?',
+        kind: 'choice',
+        options: ['לא', 'כן'],
+        detailPrompt: 'מה לא להזכיר?',
+        detailWhen: ['כן'],
+      },
+      {
+        id: 'q37',
+        text: 'יש נושאים רגישים בעבודה שלך (פוליטיים, ארגוניים, אישיים) שהיית רוצה שנימנע מהם לגמרי?',
+        kind: 'choice',
+        options: ['לא', 'כן'],
+        detailPrompt: 'מאילו נושאים להימנע?',
+        detailWhen: ['כן'],
+      },
       { id: 'q38', text: 'אם פוסט שנכתב בשמך ישמע "כמעט נכון אבל לא בדיוק את/ה", מה יהיה הדבר הראשון שתבדוק/י כדי לתקן אותו?' },
-      { id: 'q39', text: 'האם את/ה מבין/ה ומסכים/ה שכל פוסט שייכתב בשמך יישלח אליך לאישור או עריכה לפני שהוא יוצא לאוויר? (כן / לא / יש לי הסתייגות)' },
+      {
+        id: 'q39',
+        text: 'האם את/ה מבין/ה ומסכים/ה שכל פוסט שייכתב בשמך יישלח אליך לאישור או עריכה לפני שהוא יוצא לאוויר?',
+        kind: 'choice',
+        options: ['כן', 'לא', 'יש לי הסתייגות'],
+        detailPrompt: 'מה ההסתייגות?',
+        detailWhen: ['לא', 'יש לי הסתייגות'],
+      },
     ],
   },
 ]

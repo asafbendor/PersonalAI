@@ -10,9 +10,11 @@ body {
   font-family: 'Inter', system-ui, sans-serif;
 }
 
-* {
-  text-align: right;
-}
+/* Do NOT add `* { text-align: right }` back.
+   It looks harmless but it overrides the browser's own centering on buttons,
+   so every button label sticks to the right edge and stops reading as a button.
+   `body` already sets the direction, and text alignment inherits from it, so
+   the universal selector adds nothing except that bug. */
 
 input, textarea, select {
   text-align: right;
