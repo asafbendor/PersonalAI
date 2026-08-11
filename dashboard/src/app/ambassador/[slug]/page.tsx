@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import ReactMarkdown from 'react-markdown'
+import PublishLinks from '@/components/PublishLinks'
 
 interface Post {
   slug: string
@@ -461,8 +462,10 @@ export default function AmbassadorPage() {
                   </div>
                 )}
 
+                {post.status === 'approved' && <PublishLinks text={post.content} />}
+
                 {post.status === 'approved' && (
-                  <div className="text-xs text-gray-500">
+                  <div className="text-xs text-gray-500 mt-3">
                     אושר
                     {post.approvedAt
                       ? ` ב-${new Date(post.approvedAt).toLocaleString('he-IL')}`

@@ -261,7 +261,7 @@ function GenerateForm() {
                     onClick={() => copyToClipboard(result.editing ?? result.post, result.slug)}
                     className="text-xs border border-gray-200 px-3 py-1.5 rounded-lg text-gray-500 hover:text-brand-600 hover:border-brand-300 transition-colors"
                   >
-                    {copiedSlug === result.slug ? '✓ הועתק' : 'העתק'}
+                    {copiedSlug === result.slug ? '✓ הועתק' : 'העתקה'}
                   </button>
                   <button
                     onClick={() => handleSave(result)}
@@ -289,6 +289,22 @@ function GenerateForm() {
                 className="w-full p-5 text-sm text-gray-800 leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-inset"
                 dir="rtl"
               />
+
+              {/* Saving is not the end of the flow. Without this pointer the
+                  approval step is easy to miss, since it lives on the
+                  ambassador's page and not here. */}
+              {result.saved && (
+                <div className="px-5 py-3 bg-green-50 border-t border-green-100 text-xs text-green-800">
+                  נשמר. השלב הבא הוא שליחה לאישור השגריר/ה, בעמוד{' '}
+                  <Link
+                    href={`/ambassador/${result.slug}`}
+                    className="font-medium underline hover:text-green-900"
+                  >
+                    {result.personaName}
+                  </Link>
+                  , בטאב &quot;פוסטים&quot;. קישורי הפרסום נפתחים שם רק אחרי האישור.
+                </div>
+              )}
             </div>
           ))}
         </div>
