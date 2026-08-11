@@ -2,10 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import matter from 'gray-matter'
 import { buildSlug, ensureUniqueSlug } from './slug'
-
-const DATA_PATH = process.env.DATA_PATH
-  ? path.resolve(process.cwd(), process.env.DATA_PATH)
-  : path.resolve(process.cwd(), '..')
+import { DATA_PATH, PERSISTENT_DATA_PATH } from './storage'
 
 const PERSONAS_DIR = path.join(DATA_PATH, 'personas')
 const OUTPUTS_DIR = path.join(DATA_PATH, 'outputs')
@@ -14,12 +11,9 @@ const OUTPUTS_DIR = path.join(DATA_PATH, 'outputs')
 // "Save as Persona" flow) cannot be written into PERSONAS_DIR, that path comes
 // from the deployed git checkout and gets wiped on every Railway redeploy.
 // Instead they're written under the same persistent volume used for candidate
-// answers (PERSISTENT_DATA_PATH, falls back to DATA_PATH locally), and read
-// back by merging both locations. The 3 original hand-built personas live in
-// PERSONAS_DIR (curated, git-tracked); anything created via the app lives here.
-const PERSISTENT_DATA_PATH = process.env.PERSISTENT_DATA_PATH
-  ? path.resolve(process.env.PERSISTENT_DATA_PATH)
-  : DATA_PATH
+// answers, and read back by merging both locations. The 3 original hand-built
+// personas live in PERSONAS_DIR (curated, git-tracked); anything created via
+// the app lives here.
 const RUNTIME_PERSONAS_DIR = path.join(PERSISTENT_DATA_PATH, 'personas')
 
 // Resolve which directory actually holds a given persona's profile.md,

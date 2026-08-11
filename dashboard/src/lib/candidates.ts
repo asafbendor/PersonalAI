@@ -3,20 +3,11 @@ import path from 'path'
 import matter from 'gray-matter'
 import { QUESTIONNAIRE_SECTIONS, TOTAL_QUESTIONS } from './questionnaire'
 import { buildSlug, ensureUniqueSlug } from './slug'
+import { PERSISTENT_DATA_PATH } from './storage'
 
-const DATA_PATH = process.env.DATA_PATH
-  ? path.resolve(process.cwd(), process.env.DATA_PATH)
-  : path.resolve(process.cwd(), '..')
-
-// Candidate answers are real user-submitted data and must survive redeploys.
-// On Railway, the regular app filesystem is wiped on every deploy, only a
-// mounted Volume persists. PERSISTENT_DATA_PATH should point at that volume's
-// mount path (e.g. "/data"). Locally (no volume), it falls back to the same
-// DATA_PATH used for personas/outputs, so dev keeps working unchanged.
-const PERSISTENT_DATA_PATH = process.env.PERSISTENT_DATA_PATH
-  ? path.resolve(process.env.PERSISTENT_DATA_PATH)
-  : DATA_PATH
-
+// Candidate answers are real user-submitted data and must survive redeploys,
+// so they live on the persistent volume rather than the app filesystem.
+// See storage.ts for how that path is resolved and verified.
 const CANDIDATES_DIR = path.join(PERSISTENT_DATA_PATH, 'candidates')
 
 export interface CandidateMeta {

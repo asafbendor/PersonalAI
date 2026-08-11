@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { TOTAL_QUESTIONS } from '@/lib/questionnaire'
+import StorageWarningBanner from '@/components/StorageWarningBanner'
+import type { StorageHealth } from '@/lib/storage'
 
 interface CandidateMeta {
   slug: string
@@ -29,16 +31,24 @@ const STATUS_COLORS: Record<string, string> = {
 export default function CandidatesPage() {
   const [candidates, setCandidates] = useState<CandidateMeta[]>([])
   const [loading, setLoading] = useState(true)
+  const [storage, setStorage] = useState<StorageHealth | null>(null)
 
   useEffect(() => {
     fetch('/api/candidates')
       .then((r) => r.json())
       .then((data) => setCandidates(Array.isArray(data) ? data : []))
       .finally(() => setLoading(false))
+
+    // Returns 503 when unhealthy, so read the body regardless of status.
+    fetch('/api/health/storage')
+      .then((r) => r.json())
+      .then(setStorage)
+      .catch(() => setStorage(null))
   }, [])
 
   return (
     <div>
+      <StorageWarningBanner health={storage} />
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold">מועמדים לשגרירות</h1>

@@ -1,4 +1,5 @@
 {
+  "_comment": "Volumes are NOT configured here. A Railway Volume is attached in the Railway UI (Service > Volumes), and this file cannot tell you whether one exists. That is exactly how a missing volume went unnoticed and cost a real candidate submission. Required setup: Volume mounted at /data, plus env var PERSISTENT_DATA_PATH=/data. Verify with GET /api/health/storage.",
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
     "builder": "NIXPACKS"

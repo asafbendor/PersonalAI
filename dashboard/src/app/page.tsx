@@ -1,4 +1,5 @@
 import { getAllPersonas } from '@/lib/personas'
+import StorageWarning from '@/components/StorageWarning'
 import Link from 'next/link'
 
 const statusLabel: Record<string, { label: string; color: string }> = {
@@ -13,6 +14,8 @@ export default function Home() {
 
   return (
     <div>
+      <StorageWarning />
+
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">לוח הבקרה</h1>
