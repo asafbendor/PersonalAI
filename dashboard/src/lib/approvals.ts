@@ -53,6 +53,27 @@ export function sendForApproval(
   return { token }
 }
 
+// Returns the review link's token WITHOUT touching the post's status.
+//
+// Deliberately separate from sendForApproval, which sets the status back to
+// pending. On an approved post that would quietly reopen a settled decision,
+// so "show me the link again" must not go through it. Mints a token only if
+// the post somehow has none, and even then leaves the status alone.
+export function getReviewToken(
+  personaSlug: string,
+  filename: string
+): { token: string } | null {
+  const parsed = readPostFile(personaSlug, filename)
+  if (!parsed) return null
+
+  if (parsed.meta['token']) return { token: parsed.meta['token'] }
+
+  const token = newToken()
+  parsed.meta['token'] = token
+  writePostFile(personaSlug, filename, parsed)
+  return { token }
+}
+
 // Tokens are not indexed anywhere, so this scans posts. At the scale this
 // project operates at (single digits of ambassadors, tens of posts) a scan is
 // simpler and less fragile than maintaining a separate index that could drift.

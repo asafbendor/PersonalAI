@@ -95,11 +95,14 @@ export default function AmbassadorPage() {
     }
   }
 
-  const sendForApproval = async (post: Post) => {
+  // `endpoint` decides whether this also moves the post into "waiting for
+  // approval". Showing the link for an already-approved post must NOT do that,
+  // so it goes through review-link, which only reads the token.
+  const fetchReviewLink = async (post: Post, endpoint: string, markPending: boolean) => {
     setSendingSlug(post.slug)
     setSendError('')
     try {
-      const res = await fetch('/api/posts/send-for-approval', {
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ personaSlug: slug, filename: post.filename }),
@@ -110,15 +113,23 @@ export default function AmbassadorPage() {
         ...prev,
         [post.slug]: `${window.location.origin}/review/${data.token}`,
       }))
-      setPosts((prev) =>
-        prev.map((p) => (p.slug === post.slug ? { ...p, status: 'pending' } : p))
-      )
+      if (markPending) {
+        setPosts((prev) =>
+          prev.map((p) => (p.slug === post.slug ? { ...p, status: 'pending' } : p))
+        )
+      }
     } catch (e) {
       setSendError(String(e))
     } finally {
       setSendingSlug(null)
     }
   }
+
+  const sendForApproval = (post: Post) =>
+    fetchReviewLink(post, '/api/posts/send-for-approval', true)
+
+  const showExistingLink = (post: Post) =>
+    fetchReviewLink(post, '/api/posts/review-link', false)
 
   // Delete persona
   const [confirmingDelete, setConfirmingDelete] = useState(false)
@@ -463,6 +474,23 @@ export default function AmbassadorPage() {
                 )}
 
                 {post.status === 'approved' && <PublishLinks text={post.content} />}
+
+                {post.status === 'approved' && (
+                  <div className="mt-3">
+                    <button
+                      onClick={() => showExistingLink(post)}
+                      disabled={sendingSlug === post.slug}
+                      className="text-xs border border-gray-200 px-3 py-1.5 rounded-lg text-gray-500 hover:border-brand-300 hover:text-brand-600 transition-colors disabled:opacity-50"
+                    >
+                      {sendingSlug === post.slug
+                        ? 'בטעינה...'
+                        : 'הצגת קישור השגריר/ה'}
+                    </button>
+                    <span className="text-xs text-gray-400 mr-2">
+                      אותו קישור, למקרה שאבד. הצגתו לא מבטלת את האישור.
+                    </span>
+                  </div>
+                )}
 
                 {post.status === 'approved' && (
                   <div className="text-xs text-gray-500 mt-3">
