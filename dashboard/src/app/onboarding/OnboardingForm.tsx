@@ -84,7 +84,7 @@ export default function OnboardingForm() {
     <div className="max-w-3xl mx-auto">
       <div className="mb-6">
         <div className="flex items-center justify-between mb-2">
-          <h1 className="text-2xl font-bold">שאלון הכרות, שגריר דיגיטלי</h1>
+          <h1 className="text-2xl font-bold">שאלון הכרות לשגרירות דיגיטלית</h1>
           <span className="text-sm text-gray-500">
             שלב {step + 1} מתוך {totalSteps}
           </span>
@@ -198,7 +198,7 @@ export default function OnboardingForm() {
                           onChange={(e) => setAnswer(q.id, e.target.value)}
                           rows={3}
                           className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none resize-y"
-                          placeholder="כתוב כאן בחופשיות, אין תשובה נכונה..."
+                          placeholder="אפשר לכתוב כאן בחופשיות, אין תשובה נכונה..."
                         />
                       </div>
                     ))}
@@ -247,7 +247,7 @@ export default function OnboardingForm() {
               disabled={submitting}
               className="w-full bg-brand-600 text-white py-3 rounded-lg font-medium hover:bg-brand-700 transition-colors disabled:opacity-50"
             >
-              {submitting ? 'שולח...' : 'שלח את התשובות'}
+              {submitting ? 'בשליחה...' : 'שליחת התשובות'}
             </button>
           </div>
         )}

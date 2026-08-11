@@ -173,6 +173,75 @@ last-updated: <YYYY-MM-DD>
  * correct anything that misrepresents the candidate, and only then commit it
  * as the persona's profile, exactly like the 3 existing personas were created.
  */
+// Turns one concrete correction by an ambassador into reusable voice guidance.
+//
+// This is the highest-quality training signal the system can get: a real person
+// fixing a real sentence written in their name, which beats anything they could
+// self-report in a questionnaire. Deliberately returns a draft for the operator
+// to read and paste, and never writes to profile.md itself, matching the same
+// "AI drafts, human approves" rule used for persona creation.
+export async function generateVoiceLesson(
+  personaName: string,
+  profileContent: string,
+  original: string,
+  edited: string
+): Promise<string> {
+  const systemPrompt = `אתה מנתח עריכות שאדם אמיתי ביצע בטקסט שנכתב בשמו, כדי לחלץ מהן כללי כתיבה לשימוש חוזר.
+
+לפניך שתי גרסאות של אותו פוסט: הגרסה שהמערכת ייצרה, והגרסה אחרי שהאדם ערך אותה ואישר. ההבדל ביניהן הוא התיקון שלו.
+
+המשימה: לזהות מה השינוי מלמד על הקול האמיתי שלו, ולנסח את זה ככללים קצרים וקונקרטיים שאפשר להוסיף לקובץ הפרופיל.
+
+חוקים קשוחים:
+- לא להשתמש במקף ארוך (—) בשום מקום, השתמש במקף רגיל, נקודתיים, פסיק, או ניסוח מחדש
+- להסתמך אך ורק על ההבדל בין שתי הגרסאות, לא להמציא העדפות שלא נצפו
+- אם ההבדל הוא רק תיקון עובדתי או תיקון הקלדה ואין ממנו לקח סגנוני, לכתוב זאת במפורש ולא להמציא כלל
+- להעדיף ניסוח אופרטיבי ("להימנע מ...", "להעדיף...") על תיאור מופשט
+- מקסימום 5 כללים, ורק כאלה שבאמת עולים מהעריכה
+- אם הכלל כבר מופיע בפרופיל הקיים, לציין זאת במקום לחזור עליו
+- להחזיר רק את הטקסט להוספה, בלי הקדמות והסברים
+
+פורמט הפלט:
+
+### לקח מעריכה (תאריך יתווסף על ידי המערכת)
+
+- כלל ראשון
+- כלל שני`
+
+  const userPrompt = `שם: ${personaName}
+
+הפרופיל הקיים:
+
+${profileContent || '(אין פרופיל)'}
+
+---
+
+הגרסה שהמערכת ייצרה:
+
+${original}
+
+---
+
+הגרסה אחרי העריכה והאישור של האדם:
+
+${edited}
+
+---
+
+מה ההבדל מלמד? החזר רק את הטקסט להוספה לפרופיל.`
+
+  const message = await client.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 1024,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userPrompt }],
+  })
+
+  const block = message.content[0]
+  if (block.type !== 'text') throw new Error('Unexpected response type')
+  return block.text.trim()
+}
+
 export async function generatePersonaDraft(candidate: CandidateFull): Promise<string> {
   const qaText = QUESTIONNAIRE_SECTIONS.map((section) => {
     const lines = section.questions.map((q) => {

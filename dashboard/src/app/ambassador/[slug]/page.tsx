@@ -14,6 +14,9 @@ interface Post {
   goal: string
   status: string
   content: string
+  originalContent?: string
+  edited: boolean
+  approvedAt: string
 }
 
 interface PersonaFull {
@@ -36,8 +39,16 @@ type Tab = 'posts' | 'profile' | 'samples' | 'media'
 
 const statusColors: Record<string, string> = {
   draft: 'bg-yellow-100 text-yellow-700 border-yellow-200',
+  pending: 'bg-orange-100 text-orange-700 border-orange-200',
   approved: 'bg-green-100 text-green-700 border-green-200',
   published: 'bg-blue-100 text-blue-700 border-blue-200',
+}
+
+const statusLabels: Record<string, string> = {
+  draft: 'טיוטה',
+  pending: 'ממתין לאישור',
+  approved: 'מאושר',
+  published: 'פורסם',
 }
 
 export default function AmbassadorPage() {
@@ -50,6 +61,63 @@ export default function AmbassadorPage() {
   const [activeTab, setActiveTab] = useState<Tab>('posts')
   const [copiedSlug, setCopiedSlug] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+
+  // Send a post to the ambassador for approval, and hold the resulting link
+  // so the operator can copy it. Keyed by post slug.
+  const [sendingSlug, setSendingSlug] = useState<string | null>(null)
+  const [reviewLinks, setReviewLinks] = useState<Record<string, string>>({})
+  const [copiedLinkSlug, setCopiedLinkSlug] = useState<string | null>(null)
+  const [sendError, setSendError] = useState('')
+  // Which approved-and-edited posts have their comparison expanded
+  const [showingOriginal, setShowingOriginal] = useState<Record<string, boolean>>({})
+  // Voice rules drafted from an ambassador's edit, awaiting the operator's review
+  const [lessonSlug, setLessonSlug] = useState<string | null>(null)
+  const [lessons, setLessons] = useState<Record<string, string>>({})
+
+  const generateLesson = async (post: Post) => {
+    setLessonSlug(post.slug)
+    try {
+      const res = await fetch('/api/posts/voice-lesson', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ personaSlug: slug, filename: post.filename }),
+      })
+      const data = await res.json()
+      setLessons((prev) => ({
+        ...prev,
+        [post.slug]: res.ok ? data.lesson : `שגיאה: ${data.error}`,
+      }))
+    } catch (e) {
+      setLessons((prev) => ({ ...prev, [post.slug]: `שגיאה: ${String(e)}` }))
+    } finally {
+      setLessonSlug(null)
+    }
+  }
+
+  const sendForApproval = async (post: Post) => {
+    setSendingSlug(post.slug)
+    setSendError('')
+    try {
+      const res = await fetch('/api/posts/send-for-approval', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ personaSlug: slug, filename: post.filename }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'שגיאה בשליחה')
+      setReviewLinks((prev) => ({
+        ...prev,
+        [post.slug]: `${window.location.origin}/review/${data.token}`,
+      }))
+      setPosts((prev) =>
+        prev.map((p) => (p.slug === post.slug ? { ...p, status: 'pending' } : p))
+      )
+    } catch (e) {
+      setSendError(String(e))
+    } finally {
+      setSendingSlug(null)
+    }
+  }
 
   // Delete persona
   const [confirmingDelete, setConfirmingDelete] = useState(false)
@@ -193,7 +261,7 @@ export default function AmbassadorPage() {
                   disabled={uploadingImage}
                   className="absolute bottom-2 inset-x-2 bg-black/60 text-white text-xs py-1.5 rounded-lg hover:bg-black/75 transition-colors disabled:opacity-50"
                 >
-                  {uploadingImage ? 'מעלה תמונה...' : '📷 העלה / החלף תמונה'}
+                  {uploadingImage ? 'בהעלאת תמונה...' : '📷 העלאה / החלפה של תמונה'}
                 </button>
               </>
             )}
@@ -219,7 +287,7 @@ export default function AmbassadorPage() {
                     onClick={() => setConfirmingDelete(true)}
                     className="text-sm px-3 py-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors"
                   >
-                    🗑 מחק פרסונה
+                    🗑 מחיקת פרסונה
                   </button>
                 )}
               </div>
@@ -257,7 +325,7 @@ export default function AmbassadorPage() {
               disabled={deleting}
               className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-700 transition-colors disabled:opacity-50"
             >
-              {deleting ? 'מוחק...' : 'כן, מחק לצמיתות'}
+              {deleting ? 'במחיקה...' : 'כן, למחוק לצמיתות'}
             </button>
             <button
               onClick={() => { setConfirmingDelete(false); setDeleteError('') }}
@@ -302,7 +370,7 @@ export default function AmbassadorPage() {
                 href={`/generate?personas=${slug}`}
                 className="text-brand-600 text-sm hover:underline"
               >
-                צור פוסט ראשון &rarr;
+                יצירת פוסט ראשון &rarr;
               </Link>
             </div>
           )}
@@ -323,20 +391,155 @@ export default function AmbassadorPage() {
                 <div className="flex items-center gap-2">
                   {post.status && (
                     <span className={`text-xs border px-2 py-0.5 rounded-full ${statusColors[post.status] ?? 'bg-gray-100 text-gray-500 border-gray-200'}`}>
-                      {post.status === 'draft' ? 'טיוטה' : post.status === 'approved' ? 'מאושר' : 'פורסם'}
+                      {statusLabels[post.status] ?? post.status}
+                    </span>
+                  )}
+                  {post.edited && (
+                    <span className="text-xs border border-purple-200 bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">
+                      נערך על ידי השגריר/ה
                     </span>
                   )}
                   <button
                     onClick={() => copyToClipboard(post.content, post.slug)}
                     className="text-xs text-gray-400 hover:text-brand-600 transition-colors px-2 py-1 rounded border border-gray-200 hover:border-brand-300"
                   >
-                    {copiedSlug === post.slug ? '✓ הועתק' : 'העתק'}
+                    {copiedSlug === post.slug ? '✓ הועתק' : 'העתקה'}
                   </button>
                 </div>
               </div>
               <div className="text-gray-800 whitespace-pre-wrap leading-relaxed text-sm">
                 {post.content}
               </div>
+
+              {/* Approval: the promise made in the questionnaire's last question */}
+              <div className="mt-4 pt-4 border-t border-gray-100">
+                {post.status !== 'approved' && (
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <button
+                      onClick={() => sendForApproval(post)}
+                      disabled={sendingSlug === post.slug}
+                      className="text-xs bg-brand-600 text-white px-3 py-1.5 rounded-lg hover:bg-brand-700 transition-colors disabled:opacity-50"
+                    >
+                      {sendingSlug === post.slug
+                        ? 'ביצירת קישור...'
+                        : post.status === 'pending'
+                        ? 'הצגת קישור האישור שוב'
+                        : 'שליחה לאישור השגריר/ה'}
+                    </button>
+                    {post.status === 'pending' && !reviewLinks[post.slug] && (
+                      <span className="text-xs text-gray-400">
+                        כבר נשלח. אפשר להציג את הקישור שוב.
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {reviewLinks[post.slug] && (
+                  <div className="mt-3 bg-gray-50 rounded-lg p-3">
+                    <p className="text-xs text-gray-500 mb-2">
+                      הקישור האישי לשגריר/ה. כל מי שמחזיק/ה בו יכול/ה לראות ולאשר את הפוסט הזה,
+                      אז כדאי לשלוח אותו ישירות ולא בקבוצה.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <input
+                        readOnly
+                        value={reviewLinks[post.slug]}
+                        dir="ltr"
+                        className="flex-1 text-xs border border-gray-200 rounded px-2 py-1.5 bg-white text-left font-mono"
+                      />
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(reviewLinks[post.slug])
+                          setCopiedLinkSlug(post.slug)
+                          setTimeout(() => setCopiedLinkSlug(null), 2000)
+                        }}
+                        className="text-xs border border-gray-200 px-3 py-1.5 rounded hover:border-brand-300 hover:text-brand-600 transition-colors shrink-0"
+                      >
+                        {copiedLinkSlug === post.slug ? '✓ הועתק' : 'העתקה'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {post.status === 'approved' && (
+                  <div className="text-xs text-gray-500">
+                    אושר
+                    {post.approvedAt
+                      ? ` ב-${new Date(post.approvedAt).toLocaleString('he-IL')}`
+                      : ''}
+                    {post.originalContent && (
+                      <>
+                        {' · '}
+                        <button
+                          onClick={() =>
+                            setShowingOriginal((prev) => ({
+                              ...prev,
+                              [post.slug]: !prev[post.slug],
+                            }))
+                          }
+                          className="text-brand-600 hover:underline"
+                        >
+                          {showingOriginal[post.slug]
+                            ? 'הסתרת הגרסה המקורית'
+                            : 'הצגת מה שונה מהגרסה שנוצרה'}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {showingOriginal[post.slug] && post.originalContent && (
+                  <div className="mt-3 bg-purple-50 border border-purple-100 rounded-lg p-3">
+                    <p className="text-xs text-purple-700 font-medium mb-2">
+                      הגרסה שנוצרה במקור, לפני העריכה
+                    </p>
+                    <div className="text-gray-700 whitespace-pre-wrap leading-relaxed text-sm">
+                      {post.originalContent}
+                    </div>
+                    <p className="text-xs text-purple-600 mt-3 mb-2">
+                      ההבדל בין שתי הגרסאות הוא החומר הכי מדויק לשיפור פרופיל הקול.
+                    </p>
+                    <button
+                      onClick={() => generateLesson(post)}
+                      disabled={lessonSlug === post.slug}
+                      className="text-xs bg-purple-600 text-white px-3 py-1.5 rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50"
+                    >
+                      {lessonSlug === post.slug
+                        ? 'בהפקת הלקח...'
+                        : lessons[post.slug]
+                        ? 'הפקה מחדש'
+                        : 'הפקת כללי כתיבה מהעריכה'}
+                    </button>
+
+                    {lessons[post.slug] && (
+                      <div className="mt-3">
+                        <p className="text-xs text-purple-700 mb-1">
+                          טיוטה לעיון. אפשר לערוך כאן, ואז להעתיק ולהוסיף לפרופיל דרך טאב
+                          &quot;פרופיל&quot;. הפרופיל לא משתנה מעצמו.
+                        </p>
+                        <textarea
+                          value={lessons[post.slug]}
+                          onChange={(e) =>
+                            setLessons((prev) => ({ ...prev, [post.slug]: e.target.value }))
+                          }
+                          rows={7}
+                          className="w-full border border-purple-200 rounded-lg px-3 py-2 text-sm font-mono outline-none focus:ring-2 focus:ring-purple-300"
+                        />
+                        <button
+                          onClick={() => copyToClipboard(lessons[post.slug], `lesson-${post.slug}`)}
+                          className="text-xs border border-purple-200 px-3 py-1.5 rounded hover:bg-purple-100 transition-colors mt-1"
+                        >
+                          {copiedSlug === `lesson-${post.slug}` ? '✓ הועתק' : 'העתקה'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {sendError && post.slug === sendingSlug && (
+                <p className="text-red-600 text-xs mt-2">{sendError}</p>
+              )}
             </div>
           ))}
         </div>
@@ -355,7 +558,7 @@ export default function AmbassadorPage() {
                   onClick={startEditingProfile}
                   className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors"
                 >
-                  ✏️ ערוך פרופיל
+                  ✏️ עריכת פרופיל
                 </button>
               ) : (
                 <div className="flex items-center gap-2">
@@ -371,7 +574,7 @@ export default function AmbassadorPage() {
                     disabled={savingProfile}
                     className="text-sm px-4 py-1.5 rounded-lg bg-brand-600 text-white font-medium hover:bg-brand-700 transition-colors disabled:opacity-50"
                   >
-                    {savingProfile ? 'שומר...' : '💾 שמור שינויים'}
+                    {savingProfile ? 'בשמירה...' : '💾 שמירת שינויים'}
                   </button>
                 </div>
               )}

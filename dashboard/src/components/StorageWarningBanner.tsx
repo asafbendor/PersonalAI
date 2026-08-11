@@ -1,4 +1,5 @@
 import type { StorageHealth } from '@/lib/storage'
+import { TOTAL_QUESTIONS } from '@/lib/questionnaire'
 
 // Pure presentational banner: no fs access, no state, no 'use client' needed,
 // so it can be rendered from both Server Components (StorageWarning) and
@@ -15,7 +16,7 @@ export default function StorageWarningBanner({ health }: { health: StorageHealth
       <p className="text-sm text-red-700 mb-3">{health.reason}</p>
       <p className="text-sm text-red-700 mb-2">
         טופס ההרשמה ב-<code className="font-mono">/onboarding</code> חסום כרגע בכוונה,
-        כדי שאף מועמד לא ימלא 42 שאלות שיימחקו. כדי לפתוח אותו, ב-Railway:
+        כדי שאף מועמד/ת לא ימלא/תמלא {TOTAL_QUESTIONS} שאלות שיימחקו. כדי לפתוח אותו, ב-Railway:
       </p>
       <ol className="text-sm text-red-700 list-decimal list-inside space-y-1">
         <li>Service ← Volumes ← יצירת Volume עם mount path <code className="font-mono">/data</code></li>

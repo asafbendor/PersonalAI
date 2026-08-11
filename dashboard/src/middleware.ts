@@ -3,7 +3,9 @@ import type { NextRequest } from 'next/server'
 
 // Pages that anyone can reach without logging in.
 // /onboarding is the candidate questionnaire, it must stay public so candidates can fill it out.
-const PUBLIC_PAGES = ['/onboarding', '/login']
+// /review/[token] is the ambassador's post-approval page. They have no account,
+// the unguessable token in the URL is the credential, and it opens exactly one post.
+const PUBLIC_PAGES = ['/onboarding', '/login', '/review']
 
 // API endpoints that must stay reachable without a session.
 const PUBLIC_API_EXACT = ['/api/auth/login']
@@ -18,6 +20,11 @@ export function middleware(request: NextRequest) {
 
   // Candidate questionnaire submission must work without a session
   if (pathname === '/api/candidates' && request.method === 'POST') {
+    return NextResponse.next()
+  }
+
+  // Ambassador approval submission, same reasoning as /review above
+  if (pathname.startsWith('/api/review/') && request.method === 'POST') {
     return NextResponse.next()
   }
 

@@ -53,7 +53,7 @@ function GenerateForm() {
 
   const handleGenerate = async () => {
     if (!selected.length || !topic.trim()) {
-      setError('בחר לפחות שגריר אחד והזן נושא')
+      setError('יש לבחור לפחות שגריר/ה אחד/ת ולהזין נושא')
       return
     }
     setError('')
@@ -126,7 +126,7 @@ function GenerateForm() {
           <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-5">
             {/* Persona selection */}
             <div>
-              <label className="text-sm font-semibold text-gray-700 mb-3 block">בחר שגרירים</label>
+              <label className="text-sm font-semibold text-gray-700 mb-3 block">בחירת שגרירים</label>
               <div className="space-y-2">
                 {personas.map((p) => (
                   <label
@@ -223,7 +223,7 @@ function GenerateForm() {
               disabled={loading}
               className="w-full bg-brand-600 text-white py-2.5 rounded-lg font-medium text-sm hover:bg-brand-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading ? 'מייצר...' : `צור פוסט${selected.length > 1 ? ` (${selected.length} שגרירים)` : ''}`}
+              {loading ? 'ביצירה...' : `יצירת פוסט${selected.length > 1 ? ` (${selected.length} שגרירים)` : ''}`}
             </button>
           </div>
         </div>
@@ -244,7 +244,7 @@ function GenerateForm() {
           {results.length === 0 && !loading && (
             <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-400">
               <p className="text-lg mb-2">הפוסטים שייווצרו יופיעו כאן</p>
-              <p className="text-sm">בחר שגריר, הזן נושא ולחץ על "צור פוסט"</p>
+              <p className="text-sm">אפשר לבחור שגריר/ה, להזין נושא וללחוץ על "יצירת פוסט"</p>
             </div>
           )}
 
@@ -272,7 +272,7 @@ function GenerateForm() {
                         : 'bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50'
                     }`}
                   >
-                    {result.saved ? '✓ נשמר' : savingSlug === result.slug ? 'שומר...' : 'שמור'}
+                    {result.saved ? '✓ נשמר' : savingSlug === result.slug ? 'בשמירה...' : 'שמירה'}
                   </button>
                 </div>
               </div>

@@ -155,7 +155,7 @@ export default function CandidateDetailPage() {
             <p className="text-sm text-gray-500 mt-1">
               שני שלבים: קודם יוצרים טיוטת פרופיל ראשונית על בסיס תשובות המועמד/ת
               (באותו מבנה של הפרסונות הקיימות), קוראים אותה ומתקנים מה שצריך,
-              ואז לוחצים "שמור כפרסונה" והיא הופכת מיד לפרסונה פעילה במערכת,
+              ואז לוחצים "שמירה כפרסונה" והיא הופכת מיד לפרסונה פעילה במערכת,
               עם עמוד משלה וזמינה ליצירת פוסטים. הכל בתוך האפליקציה, בלי לגעת בקבצים.
             </p>
           </div>
@@ -164,12 +164,12 @@ export default function CandidateDetailPage() {
             disabled={generating || candidate.answeredCount === 0}
             className="bg-brand-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-700 transition-colors disabled:opacity-50 whitespace-nowrap"
           >
-            {generating ? 'יוצר טיוטה...' : draft ? 'צור טיוטה מחדש' : 'שלב 1: צור טיוטת פרסונה'}
+            {generating ? 'ביצירת טיוטה...' : draft ? 'יצירת טיוטה מחדש' : 'שלב 1: יצירת טיוטת פרסונה'}
           </button>
         </div>
 
         {candidate.answeredCount === 0 && (
-          <p className="text-sm text-amber-600">למועמד/ת הזה/ו אין עדיין תשובות, אי אפשר ליצור טיוטה.</p>
+          <p className="text-sm text-amber-600">למועמד/ת אין עדיין תשובות, אי אפשר ליצור טיוטה.</p>
         )}
         {draftError && <p className="text-red-600 text-sm">{draftError}</p>}
 
@@ -205,7 +205,7 @@ export default function CandidateDetailPage() {
                   disabled={saving}
                   className="text-sm px-4 py-1.5 rounded-lg bg-green-600 text-white font-medium hover:bg-green-700 transition-colors disabled:opacity-50 whitespace-nowrap"
                 >
-                  {saving ? 'שומר...' : '💾 שמור כפרסונה'}
+                  {saving ? 'בשמירה...' : '💾 שמירה כפרסונה'}
                 </button>
               </div>
             </div>

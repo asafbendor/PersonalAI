@@ -6,7 +6,7 @@ import LogoutButton from './LogoutButton'
 // Routes that must never show the dashboard chrome, even to an authenticated owner
 // browsing them. /onboarding is shared as a public link with candidates, it must look
 // like a clean standalone form with zero hint that other admin pages exist.
-const HIDE_NAV_PREFIXES = ['/onboarding', '/login']
+const HIDE_NAV_PREFIXES = ['/onboarding', '/login', '/review']
 
 export default function NavBar({ isAuthed }: { isAuthed: boolean }) {
   const pathname = usePathname()

@@ -83,6 +83,66 @@ export interface Post {
   goal: string
   status: string
   content: string
+  // Set only once an ambassador approved the post after changing it. Holds the
+  // text the model originally produced, so the edit can be studied later.
+  originalContent?: string
+  edited: boolean
+  approvedAt: string
+}
+
+// Separates the approved text from the model's original inside a post file.
+// Chosen as an HTML comment so the file still reads cleanly as markdown, and
+// files written before approvals existed simply do not contain it.
+export const ORIGINAL_MARKER = '\n\n<!-- גרסה מקורית לפני עריכת השגריר/ה -->\n\n'
+
+export interface ParsedPostFile {
+  meta: Record<string, string>
+  body: string
+}
+
+// Post files use a bold-key header block ("**נושא:** ...") terminated by a ---
+// line, then the body. Reading and writing go through these two functions so
+// the format is defined in exactly one place.
+function parsePostFile(raw: string): ParsedPostFile {
+  const lines = raw.split('\n')
+  const meta: Record<string, string> = {}
+  let bodyStart = 0
+
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].match(/^\*\*(.+?):\*\*\s*(.*)$/)
+    if (match) {
+      meta[match[1].trim()] = match[2].trim()
+    } else if (lines[i].startsWith('---')) {
+      bodyStart = i + 1
+      break
+    }
+  }
+
+  return { meta, body: lines.slice(bodyStart).join('\n').trim() }
+}
+
+function serializePostFile({ meta, body }: ParsedPostFile): string {
+  const header = Object.entries(meta)
+    .map(([k, v]) => `**${k}:** ${v}`)
+    .join('\n')
+  return `${header}\n\n---\n\n${body}`
+}
+
+export function readPostFile(personaSlug: string, filename: string): ParsedPostFile | null {
+  const entry = postFilesFor(personaSlug).find((f) => f.filename === filename)
+  if (!entry) return null
+  return parsePostFile(fs.readFileSync(path.join(entry.dir, filename), 'utf-8'))
+}
+
+// Always writes to the volume, even when the post was originally read from the
+// git checkout. An approval must not be lost on the next redeploy, and the
+// merged read means the volume copy simply shadows the committed one.
+export function writePostFile(
+  personaSlug: string,
+  filename: string,
+  parsed: ParsedPostFile
+): void {
+  savePost(personaSlug, filename, serializePostFile(parsed))
 }
 
 // True only for personas that live exclusively in the runtime/volume-backed
@@ -176,25 +236,11 @@ export function getPersonaFull(slug: string): PersonaFull | null {
 export function getPersonaPosts(slug: string): Post[] {
   return postFilesFor(slug)
     .map(({ filename, dir }) => {
-      const raw = fs.readFileSync(path.join(dir, filename), 'utf-8')
-
-      // Parse custom frontmatter (bold key: value format)
-      const lines = raw.split('\n')
-      const meta: Record<string, string> = {}
-      let bodyStart = 0
-
-      for (let i = 0; i < lines.length; i++) {
-        const match = lines[i].match(/^\*\*(.+?):\*\*\s*(.*)$/)
-        if (match) {
-          meta[match[1].trim()] = match[2].trim()
-        } else if (lines[i].startsWith('---')) {
-          bodyStart = i + 1
-          break
-        }
-      }
-
-      const content = lines.slice(bodyStart).join('\n').trim()
+      const { meta, body } = parsePostFile(fs.readFileSync(path.join(dir, filename), 'utf-8'))
       const dateMatch = filename.match(/^(\d{4}-\d{2}-\d{2})/)
+
+      // An edited-and-approved post keeps both versions in one file.
+      const [content, originalContent] = body.split(ORIGINAL_MARKER)
 
       return {
         slug: filename.replace('.md', ''),
@@ -205,7 +251,10 @@ export function getPersonaPosts(slug: string): Post[] {
         platform: meta['פלטפורמה'] || meta['Platform'] || '',
         goal: meta['מטרה'] || meta['Goal'] || '',
         status: meta['status'] || 'draft',
-        content,
+        content: content.trim(),
+        originalContent: originalContent?.trim(),
+        edited: meta['נערך'] === 'true',
+        approvedAt: meta['אושר'] || '',
       }
     })
 }
