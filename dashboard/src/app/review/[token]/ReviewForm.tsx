@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import ApprovedPostView from './ApprovedPostView'
 
 export default function ReviewForm({
   token,
@@ -41,18 +42,10 @@ export default function ReviewForm({
     }
   }
 
+  // Show the approved text, not just a thank-you. Approving is the moment the
+  // ambassador is about to publish, so the text and the copy button belong here.
   if (done) {
-    return (
-      <div className="max-w-2xl mx-auto bg-white rounded-2xl shadow-sm border border-gray-100 p-10 text-center">
-        <div className="text-5xl mb-4">✅</div>
-        <h1 className="text-2xl font-bold mb-2">תודה, הפוסט אושר</h1>
-        <p className="text-gray-600 leading-relaxed">
-          {done.edited
-            ? 'השינויים שלך נשמרו, והם גם עוזרים לנו לדייק את הכתיבה בשמך בפעם הבאה. אפשר לסגור את החלון הזה.'
-            : 'אפשר לסגור את החלון הזה.'}
-        </p>
-      </div>
-    )
+    return <ApprovedPostView content={text} edited={done.edited} />
   }
 
   return (
@@ -69,6 +62,9 @@ export default function ReviewForm({
         <p className="text-gray-600 leading-relaxed mb-6">
           זהו פוסט שנכתב בשמך ועדיין לא פורסם. אפשר לאשר אותו כמו שהוא, או לערוך אותו
           כאן ישירות ואז לאשר. שום דבר לא יוצא לאוויר לפני שתאשר/י.
+          <br />
+          מיד אחרי האישור יופיע כאן הנוסח הסופי עם כפתור העתקה וקישורים לרשתות, ואפשר
+          יהיה לחזור לקישור הזה בכל שלב.
         </p>
 
         {topic && (
