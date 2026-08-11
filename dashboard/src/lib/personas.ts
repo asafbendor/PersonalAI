@@ -16,6 +16,29 @@ const OUTPUTS_DIR = path.join(DATA_PATH, 'outputs')
 // the app lives here.
 const RUNTIME_PERSONAS_DIR = path.join(PERSISTENT_DATA_PATH, 'personas')
 
+// Posts follow the same split as personas, and for the same reason: OUTPUTS_DIR
+// comes from the git checkout and is wiped on every redeploy, so a post saved
+// from the app would silently vanish. Posts generated at runtime go here, and
+// reads merge both locations (git-committed posts stay visible alongside them).
+const RUNTIME_OUTPUTS_DIR = path.join(PERSISTENT_DATA_PATH, 'outputs')
+
+// All .md posts for a persona across both locations, newest first.
+// Keyed by filename so a runtime post shadows a curated one of the same name.
+function postFilesFor(slug: string): Array<{ filename: string; dir: string }> {
+  const byName = new Map<string, string>()
+  for (const base of [OUTPUTS_DIR, RUNTIME_OUTPUTS_DIR]) {
+    const dir = path.join(base, slug)
+    if (!fs.existsSync(dir)) continue
+    for (const f of fs.readdirSync(dir)) {
+      if (f.endsWith('.md')) byName.set(f, dir)
+    }
+  }
+  return Array.from(byName.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .reverse()
+    .map(([filename, dir]) => ({ filename, dir }))
+}
+
 // Resolve which directory actually holds a given persona's profile.md,
 // checking the curated git-tracked location first, then the runtime one.
 function personaDirFor(slug: string): string | null {
@@ -98,11 +121,7 @@ function parseProfile(slug: string): PersonaMeta | null {
   const videoFile = files.find((f) => /\.(mp4|mov|webm)$/i.test(f))
 
   // Count posts
-  const outputDir = path.join(OUTPUTS_DIR, slug)
-  let postCount = 0
-  if (fs.existsSync(outputDir)) {
-    postCount = fs.readdirSync(outputDir).filter((f) => f.endsWith('.md')).length
-  }
+  const postCount = postFilesFor(slug).length
 
   // Extract personality words from content
   const personalityMatch = content.match(/## Personality in 5 Words\n\n(.+)/m)
@@ -155,16 +174,9 @@ export function getPersonaFull(slug: string): PersonaFull | null {
 }
 
 export function getPersonaPosts(slug: string): Post[] {
-  const outputDir = path.join(OUTPUTS_DIR, slug)
-  if (!fs.existsSync(outputDir)) return []
-
-  return fs
-    .readdirSync(outputDir)
-    .filter((f) => f.endsWith('.md'))
-    .sort()
-    .reverse()
-    .map((filename) => {
-      const raw = fs.readFileSync(path.join(outputDir, filename), 'utf-8')
+  return postFilesFor(slug)
+    .map(({ filename, dir }) => {
+      const raw = fs.readFileSync(path.join(dir, filename), 'utf-8')
 
       // Parse custom frontmatter (bold key: value format)
       const lines = raw.split('\n')
@@ -205,8 +217,10 @@ export function getProfileRawContent(slug: string): string {
   return content
 }
 
+// Always writes to the persistent volume, never to the git checkout, so a post
+// survives the next redeploy. Reads merge both, so this stays invisible in the UI.
 export function savePost(personaSlug: string, filename: string, content: string): void {
-  const outputDir = path.join(OUTPUTS_DIR, personaSlug)
+  const outputDir = path.join(RUNTIME_OUTPUTS_DIR, personaSlug)
   if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true })
   fs.writeFileSync(path.join(outputDir, filename), content, 'utf-8')
 }
