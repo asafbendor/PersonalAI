@@ -11,7 +11,8 @@ import { QUESTIONNAIRE_SECTIONS } from '../public/questionnaire.js';
 const MODEL = 'claude-opus-5-5';
 
 // Belt and braces: the prompts forbid the em dash, and anything that slips through is replaced.
-export const noEmDash = (s) => String(s ?? '').replace(/\s*—\s*/g, ' - ').replace(/–/g, '-');
+const EM = String.fromCharCode(0x2014), EN = String.fromCharCode(0x2013);
+export const noEmDash = (s) => String(s ?? '').split(EM).map((x, i, a) => (i < a.length - 1 ? x.trimEnd() : x)).join(' - ').replace(/ - \s+/g, ' - ').split(EN).join('-');
 
 function client(env) {
   if (!env.ANTHROPIC_API_KEY) throw new Error('מפתח ה-AI לא הוגדר בשרת');
@@ -33,7 +34,8 @@ const HARD_RULES = `חוקים קשוחים:
 - בלי שפה שיווקית ישירה ("כנסו", "הירשמו") ובלי הגזמות ("הכי טוב בעולם", "מדהים")
 - הפוסט נשמע כמו אדם אמיתי שכותב בעצמו, לא כמו AI ולא כמו מחלקת שיווק
 - הזווית השיווקית משובצת בתוך הסיפור באופן טבעי, ולא מוצהרת
-- לא ממציאים עובדות, מספרים, שמות מטופלים או אירועים שלא מופיעים בפרופיל או בבקשה
+- אסור להמציא בשם אדם אמיתי: אירועים, מטופלים, ציטוטים, מספרים או פרטים שלא מופיעים בפרופיל, בדוגמאות, בסיפור שהוא שלח או בבקשה. כשפרט קונקרטי עוזר לפוסט ואין לו מקור, עדיף לנסח באופן כללי. פרט כזה שבכל זאת נכתב חייב להופיע ברשימת הפרטים לאישור
+- אסור לכלול פרט שעלול לזהות מטופל (שם, גיל מדויק, מחלה נדירה, תאריך, או מקרה ספציפי שאפשר לזהות)
 - אורך: 150 עד 280 מילים, אלא אם הפלטפורמה או הבקשה מחייבות אחרת`;
 
 // The persona block is identical for every request about the same persona, so it is cached.
@@ -61,9 +63,13 @@ ${samples || '(אין עדיין דוגמאות, להסתמך על הפרופי�
 const Variants = z.object({
   variants: z.array(z.object({
     approach: z.string().describe('In Hebrew, 3 to 7 words: what makes this version different'),
-    text: z.string().describe('The full post in Hebrew, ready to publish'),
+    text: z.string().describe('The full post in the requested language, ready to publish'),
+    unverified: z.array(z.string()).describe('Exact short quotes from the text of concrete details (events, numbers, people, quotes) that did not come from the profile, samples, story or request, for the person to confirm. Empty when none'),
+    medical: z.boolean().describe('True when the post discusses medical care, treatment, a condition or health advice'),
   })).describe('Exactly three distinct versions'),
 });
+
+export const LANGS = { he: 'עברית', ar: 'ערבית', ru: 'רוסית', en: 'אנגלית' };
 
 export async function generateVariants(env, persona, req) {
   const response = await client(env).messages.parse({
@@ -80,13 +86,49 @@ export async function generateVariants(env, persona, req) {
 זווית שיווקית: ${req.angle || 'לא צוינה'}
 ${req.tone ? `טון מבוקש: ${req.tone}` : ''}
 ${req.context ? `הקשר מלוח התוכן: ${req.context}` : ''}
+שפת הפוסט: ${LANGS[req.language] || 'עברית'}${req.language && req.language !== 'he' ? ' (לכתוב בשפה הזו, באותו קול ובאותה רמת שפה של הדוגמאות)' : ''}
+${req.story ? `\nהסיפור ש${persona.name} שלח/ה בעצמו/ה, והוא חומר הגלם העיקרי לפוסט. לשמור על העובדות שלו בדיוק:\n"""\n${req.story}\n"""` : ''}
 
-הטקסט עצמו בלבד, בלי כותרות, האשטגים רק אם הם מופיעים בדוגמאות.`,
+הטקסט עצמו בלבד, בלי כותרות, האשטגים רק אם הם מופיעים בדוגמאות. בלי קישורים בגוף הפוסט.`,
     }],
   });
   check(response);
   if (!response.parsed_output) throw new Error('התקבל פלט לא תקין ממודל ה-AI');
-  return response.parsed_output.variants.slice(0, 3).map((v) => ({ approach: noEmDash(v.approach), text: noEmDash(v.text) }));
+  return response.parsed_output.variants.slice(0, 3).map((v) => ({
+    approach: noEmDash(v.approach), text: noEmDash(v.text), medical: !!v.medical,
+    unverified: (v.unverified || []).map(noEmDash).filter(Boolean).slice(0, 8),
+  }));
+}
+
+const Safety = z.object({
+  flags: z.array(z.object({
+    kind: z.enum(['patient', 'medical_claim', 'sensitive', 'boundary', 'fabrication']).describe('patient: could identify a patient. medical_claim: unsupported medical or health claim. sensitive: political, organizational or otherwise sensitive. boundary: goes against what the person asked to avoid. fabrication: a concrete detail with no source'),
+    quote: z.string().describe('The exact short part of the post this is about'),
+    why: z.string().describe('One short Hebrew sentence explaining the concern'),
+  })),
+});
+
+// Reviewer, not editor: it points at problems and never rewrites. The operator decides.
+export async function safetyCheck(env, persona, body, boundaries) {
+  const response = await client(env).messages.parse({
+    model: MODEL,
+    max_tokens: 8000,
+    output_config: { effort: 'medium', format: zodOutputFormat(Safety) },
+    system: `אתה בודק פוסטים שעובדים של שירותי בריאות כללית מפרסמים בשמם ברשתות. התפקיד: להצביע על סיכונים לפני שהפוסט נשלח לאישור של העובד/ת. לא לתקן, לא לשכתב, רק להצביע.
+מה מחפשים:
+- פרט שעלול לזהות מטופל או בן משפחה (גם צירוף של פרטים כלליים שביחד מזהים)
+- טענה רפואית או בריאותית שאין לה ביסוס, או שנשמעת כמו ייעוץ רפואי אישי
+- נושא פוליטי, ארגוני או רגיש שעלול לפגוע בעובד/ת או בכללית
+- כל דבר שהעובד/ת ביקש/ה במפורש לא לכתוב בשמו/ה
+- פרט קונקרטי (אירוע, מספר, ציטוט) שלא מופיע בחומר של העובד/ת
+אם אין בעיה, מחזירים רשימה ריקה. לא מחפשים בעיות סגנון. אסור מקף ארוך.`,
+    messages: [{
+      role: 'user',
+      content: `העובד/ת: ${persona.name}\n\nמה ביקש/ה להימנע ממנו:\n${boundaries || '(לא צוין בנפרד, לבדוק לפי הפרופיל)'}\n\nהפרופיל:\n${persona.profile_md}\n\n---\nהפוסט לבדיקה:\n${body}`,
+    }],
+  });
+  check(response);
+  return (response.parsed_output?.flags || []).map((f) => ({ kind: f.kind, quote: noEmDash(f.quote), why: noEmDash(f.why) })).slice(0, 12);
 }
 
 const Scores = z.object({

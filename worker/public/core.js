@@ -62,6 +62,8 @@ export function modal({ title, body, actions = [], narrow = false }) {
     const onKey = (e) => { if (e.key === 'Escape') close(null); };
     bg.addEventListener('click', (e) => {
       if (e.target === bg || e.target.closest('[data-x]')) return close(null);
+      const pk = e.target.closest('[data-pick]');
+      if (pk) return close(Number(pk.dataset.pick));
       const a = e.target.closest('[data-a]');
       if (a) {
         const act = actions[Number(a.dataset.a)];
@@ -125,7 +127,11 @@ const NAV = [
   { href: '/calendar', label: 'לוח פרסומים', ic: 'calendar-days', match: /^\/calendar/ },
   { href: '/topics', label: 'לוח נושאים', ic: 'list-checks', match: /^\/topics/ },
   { href: '/candidates', label: 'מועמדים', ic: 'user-plus', match: /^\/candidates/, badge: 'newCandidates' },
+  { href: '/images', label: 'מאגר תמונות', ic: 'image', match: /^\/images/ },
+  { href: '/summary', label: 'סיכום שבועי', ic: 'mail', match: /^\/summary/ },
+  { href: '/report', label: 'דוח חודשי', ic: 'file-text', match: /^\/report/ },
   { href: '/activity', label: 'מה קרה לאחרונה', ic: 'activity', match: /^\/activity/ },
+  { href: '/settings', label: 'הגדרות', ic: 'pencil', match: /^\/settings/ },
   { href: '/backup', label: 'גיבוי', ic: 'database', match: /^\/backup/ },
 ];
 

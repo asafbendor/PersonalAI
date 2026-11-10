@@ -7,7 +7,7 @@
     "directory": "./public",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"]
+    "run_worker_first": ["/api/*", "/r/*"]
   },
   "d1_databases": [
     { "binding": "DB", "database_name": "ambassador", "database_id": "88702dfc-daf0-47b4-a968-7c65ca092450" }

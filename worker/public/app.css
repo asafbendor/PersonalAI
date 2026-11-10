@@ -194,7 +194,7 @@ tbody tr.go { cursor: pointer; } tbody tr.go:hover { background: var(--g50); }
 .chip { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 10px; border-radius: 999px; font-size: 13px; font-weight: 600; background: var(--g100); color: var(--g900); white-space: nowrap; }
 .chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--g400); }
 .chip.ok::before { background: var(--green); } .chip.warn::before { background: var(--warn); } .chip.bad::before { background: var(--danger); } .chip.info::before { background: var(--sky); }
-.chip.pub { background: var(--tint-2); color: var(--deep); } .chip.pub::before { background: var(--teal); }
+.chip.published { background: var(--tint-2); color: var(--deep); } .chip.published::before { background: var(--teal); }
 .chip.plain::before { display: none; }
 
 /* persona cards */
@@ -319,3 +319,37 @@ tbody tr.go { cursor: pointer; } tbody tr.go:hover { background: var(--g50); }
 .foot-legal { border-top: 1px solid var(--g100); padding: 18px 0 24px; font-size: 13px; color: var(--g600); }
 .done-mark { width: 64px; height: 64px; border-radius: 50%; background: var(--tint-2); display: grid; place-items: center; color: var(--teal); margin-bottom: 18px; }
 .done-mark .ico { width: 34px; height: 34px; stroke-width: 2; }
+
+/* ---------- languages ---------- */
+.brandrow { display: flex; align-items: center; gap: 16px; margin-bottom: 26px; flex-wrap: wrap; }
+.brandrow .logo { margin-bottom: 0; }
+.langs { margin-inline-start: auto; display: inline-flex; border: 1.5px solid rgba(255, 255, 255, .7); border-radius: 999px; overflow: hidden; }
+.langs button { min-height: 40px; padding: 0 14px; border: 0; background: transparent; color: #fff; cursor: pointer; font-weight: 600; font-size: 14px; }
+.langs button + button { border-inline-start: 1px solid rgba(255, 255, 255, .45); }
+.langs button.on { background: #fff; color: var(--deep); }
+body.lang-ar { --font: "Noto Sans Arabic", "Heebo", Arial, sans-serif; }
+body.lang-ru { --font: "Noto Sans", "Heebo", Arial, sans-serif; }
+body.lang-ar, body.lang-ru { font-family: var(--font); }
+body.lang-ar button, body.lang-ar input, body.lang-ar textarea, body.lang-ru button, body.lang-ru input, body.lang-ru textarea { font-family: var(--font); }
+[dir="ltr"] .dirflip { transform: scaleX(-1); }
+.postimg { display: block; width: 100%; max-height: 480px; object-fit: contain; background: var(--g50); }
+ul.confirm { margin: 8px 0 0; padding-inline-start: 20px; font-size: 14.5px; }
+ul.confirm li + li { margin-top: 4px; }
+mark.flag { background: #ffe9a8; color: inherit; padding: 0 2px; }
+.flags { display: grid; gap: 8px; }
+.flags .f { display: flex; gap: 10px; align-items: flex-start; font-size: 14.5px; padding: 10px 12px; background: var(--warn-bg); border: 1px solid #f0d58a; }
+.flags .f .ico { color: var(--warn); margin-top: 2px; }
+.flags .f q { font-weight: 600; }
+.assets { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px; }
+.asset { border: 1px solid var(--g200); display: flex; flex-direction: column; min-width: 0; }
+.asset img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block; background: var(--g50); }
+.asset .in { padding: 12px 14px 14px; display: grid; gap: 6px; flex: 1; }
+.asset.pickable { cursor: pointer; } .asset.pickable:hover { border-color: var(--teal); }
+.spark { display: inline-flex; align-items: flex-end; gap: 3px; height: 28px; vertical-align: middle; }
+.spark i { width: 10px; background: var(--teal); min-height: 2px; display: block; }
+.warnbox { border: 1px solid var(--warn); background: var(--warn-bg); padding: 12px 14px; font-size: 14.5px; }
+@media print {
+  .side, .topbar, .totop, .head .actions, .noprint { display: none !important; }
+  .shell { display: block; } .page { padding: 0; max-width: none; }
+  .card, .kpis { break-inside: avoid; }
+}

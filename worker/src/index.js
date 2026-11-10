@@ -9,7 +9,7 @@
 //   from the dashboard reopens it.
 // - Question ids are permanent.
 // - Nothing is indexed by search engines.
-import { generateVariants, scoreVariants, personaDraft, voiceLesson, noEmDash } from './ai.js';
+import { generateVariants, scoreVariants, personaDraft, voiceLesson, safetyCheck, noEmDash } from './ai.js';
 import { QUESTIONNAIRE_SECTIONS, TOTAL_QUESTIONS } from '../public/questionnaire.js';
 
 const DAY = 86_400_000;
@@ -70,6 +70,31 @@ async function uniqueSlug(env, table, base) {
     if (!row) return slug;
     slug = `${base}-${i}`;
   }
+}
+
+// How much the ambassador changed the draft: word-level edit distance over the longer text.
+// 0 means approved as written, 1 means rewritten. The honest measure of voice quality.
+export function editRatio(a, b) {
+  const x = String(a).split(/\s+/).filter(Boolean), y = String(b).split(/\s+/).filter(Boolean);
+  if (!x.length && !y.length) return 0;
+  let prev = Array.from({ length: y.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= x.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= y.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return Math.round((prev[y.length] / Math.max(x.length, y.length)) * 1000) / 1000;
+}
+const toCount = (v) => (v === '' || v === null || v === undefined || Number.isNaN(Number(v)) ? null : Math.max(0, Math.min(1e7, Math.round(Number(v)))));
+
+// Israeli mobile numbers to international form for WhatsApp; anything else kept as digits.
+export function normalizePhone(raw) {
+  let d = String(raw || '').replace(/[^\d+]/g, '');
+  if (!d) return '';
+  if (d.startsWith('+')) d = d.slice(1);
+  else if (d.startsWith('00')) d = d.slice(2);
+  else if (d.startsWith('0')) d = `972${d.slice(1)}`;
+  return /^\d{9,15}$/.test(d) ? d : '';
 }
 
 // Minimal frontmatter reader, enough for the persona profile header.
@@ -186,7 +211,8 @@ function personaOut(p) {
     origin: p.origin, personalityWords: personalityWords(p.profile_md),
     image: p.image_key ? `/api/media/${encodeURIComponent(p.image_key)}?v=${encodeURIComponent(p.updated_at)}` : null,
     video: p.video_key ? `/api/media/${encodeURIComponent(p.video_key)}` : null,
-    updatedAt: p.updated_at,
+    updatedAt: p.updated_at, phone: p.phone || '', language: p.language || 'he',
+    storyPath: p.story_token ? `/story/${p.story_token}` : null, candidateSlug: p.candidate_slug,
   };
 }
 function postOut(p, base = '') {
@@ -198,6 +224,12 @@ function postOut(p, base = '') {
     sentAt: p.sent_at, approvedAt: p.approved_at, scheduledFor: p.scheduled_for,
     publishedAt: p.published_at, publishedUrl: p.published_url,
     voiceScore: p.voice_score, voiceReason: p.voice_reason, topicId: p.topic_id, createdAt: p.created_at,
+    language: p.language || 'he', medical: !!p.medical, imageId: p.image_id, storyId: p.story_id,
+    safety: p.safety_json ? JSON.parse(p.safety_json) : null, safetyAt: p.safety_at, safetyStale: !!(p.safety_at && p.updated_at > p.safety_at && p.status !== 'approved'),
+    confirm: p.confirm_json ? JSON.parse(p.confirm_json) : [],
+    trackUrl: p.link_code ? `${base}/r/${p.link_code}` : null, clicks: p.link_clicks ?? null,
+    editRatio: p.edit_ratio, reactions: p.reactions, comments: p.comments, feedbackNote: p.feedback_note,
+    remindedAt: p.reminded_at,
   };
 }
 function candidateOut(c, full = false) {
@@ -209,7 +241,7 @@ function candidateOut(c, full = false) {
   return out;
 }
 
-const POST_SELECT = 'SELECT posts.*, personas.name AS persona_name FROM posts LEFT JOIN personas ON personas.slug = posts.persona_slug';
+const POST_SELECT = 'SELECT posts.*, personas.name AS persona_name, personas.phone AS persona_phone, links.clicks AS link_clicks FROM posts LEFT JOIN personas ON personas.slug = posts.persona_slug LEFT JOIN links ON links.code = posts.link_code';
 
 async function postById(env, id) {
   const p = await env.DB.prepare(`${POST_SELECT} WHERE posts.id = ?`).bind(id).first();
@@ -218,7 +250,7 @@ async function postById(env, id) {
 }
 
 // ---------- backup ----------
-const TABLES = ['personas', 'samples', 'candidates', 'posts', 'topics', 'activity'];
+const TABLES = ['personas', 'samples', 'candidates', 'posts', 'topics', 'activity', 'stories', 'links', 'clicks', 'assets', 'settings'];
 
 async function buildSnapshot(env) {
   const tables = {};
@@ -257,7 +289,11 @@ async function backupToR2(env) {
 
 // ---------- public routes (no session) ----------
 async function publicConfig(env) {
-  return json({ turnstileSiteKey: env.TURNSTILE_SITE_KEY || null, sections: QUESTIONNAIRE_SECTIONS.length, totalQuestions: TOTAL_QUESTIONS });
+  const s = await getSettings(env);
+  return json({
+    turnstileSiteKey: env.TURNSTILE_SITE_KEY || null, sections: QUESTIONNAIRE_SECTIONS.length, totalQuestions: TOTAL_QUESTIONS,
+    contact: { name: s.contact_name || '', role: s.contact_role || '', email: s.contact_email || '', phone: s.contact_phone || '' },
+  });
 }
 
 async function verifyTurnstile(env, token, ip) {
@@ -286,8 +322,9 @@ async function submitCandidate(request, env, ctx) {
   const answered = Object.values(answers).filter((a) => a.trim()).length;
 
   const slug = await uniqueSlug(env, 'candidates', slugify(englishName) || slugify(name) || `candidate-${randomToken(3)}`);
-  await env.DB.prepare('INSERT INTO candidates (slug, name, english_name, role, company, email, answers_json, answered_count, status, submitted_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
-    .bind(slug, name, englishName, String(data.role || '').slice(0, 200), String(data.company || '').slice(0, 200), String(data.email || '').slice(0, 200), JSON.stringify(answers), answered, 'new', nowIso()).run();
+  const language = ['he', 'ar', 'ru'].includes(data.language) ? data.language : 'he';
+  await env.DB.prepare('INSERT INTO candidates (slug, name, english_name, role, company, email, answers_json, answered_count, status, submitted_at, language) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+    .bind(slug, name, englishName, String(data.role || '').slice(0, 200), String(data.company || '').slice(0, 200), String(data.email || '').slice(0, 200), JSON.stringify(answers), answered, 'new', nowIso(), language).run();
   await event(env, ctx, 'candidate', `מועמד/ת חדש/ה מילא/ה שאלון: ${name} (${answered} מתוך ${TOTAL_QUESTIONS} תשובות)`, `/candidates/${slug}`, 'שאלון חדש התקבל באתר השגרירים.');
   return json({ ok: true });
 }
@@ -301,8 +338,12 @@ async function reviewTarget(env, token) {
 async function getReview(env, token) {
   const p = await reviewTarget(env, token);
   if (!p) return json({ state: 'invalid' }, 404);
-  const base = { personaName: p.persona_name, topic: p.topic, platform: p.platform, body: p.body };
-  if (p.status === 'approved') return json({ state: 'approved', ...base, edited: !!p.edited, publishedUrl: p.published_url });
+  const base = {
+    personaName: p.persona_name, topic: p.topic, platform: p.platform, body: p.body, language: p.language || 'he',
+    confirm: p.confirm_json ? JSON.parse(p.confirm_json) : [], hasImage: !!p.image_id,
+    trackPath: p.link_code ? `/r/${p.link_code}` : null,
+  };
+  if (p.status === 'approved') return json({ state: 'approved', ...base, edited: !!p.edited, publishedUrl: p.published_url, reactions: p.reactions, comments: p.comments, feedbackNote: p.feedback_note });
   if (p.status !== 'pending') return json({ state: 'invalid' }, 404);
   if (p.token_expires_at && p.token_expires_at < nowIso()) return json({ state: 'expired', personaName: p.persona_name }, 410);
   return json({ state: 'pending', ...base });
@@ -325,8 +366,8 @@ async function approveReview(request, env, ctx, token) {
   const edited = submitted !== original;
   const t = nowIso();
   // The guarded UPDATE makes a double click or two open tabs harmless.
-  const res = await env.DB.prepare("UPDATE posts SET status = 'approved', body = ?, original_body = ?, edited = ?, approved_at = ?, updated_at = ? WHERE id = ? AND status = 'pending'")
-    .bind(edited ? submitted : original, edited ? original : null, edited ? 1 : 0, t, t, p.id).run();
+  const res = await env.DB.prepare("UPDATE posts SET status = 'approved', body = ?, original_body = ?, edited = ?, edit_ratio = ?, approved_at = ?, updated_at = ? WHERE id = ? AND status = 'pending'")
+    .bind(edited ? submitted : original, edited ? original : null, edited ? 1 : 0, edited ? editRatio(original, submitted) : 0, t, t, p.id).run();
   if (res.meta.changes) {
     await event(env, ctx, 'approved', `${p.persona_name} אישר/ה פוסט${edited ? ' עם שינויים' : ''}: ${p.topic}`, `/personas/${p.persona_slug}`, 'פוסט אושר באתר השגרירים.');
   }
@@ -336,9 +377,14 @@ async function approveReview(request, env, ctx, token) {
 async function reviewPublished(request, env, ctx, token) {
   const p = await reviewTarget(env, token);
   if (!p || p.status !== 'approved') return bad('אפשר לסמן פרסום רק אחרי אישור', 400);
-  const { url } = await body(request);
+  const d = await body(request);
+  // Numbers only: how the post did, as the ambassador sees it on the network.
+  if (d.url === undefined && (d.reactions !== undefined || d.comments !== undefined)) {
+    await env.DB.prepare('UPDATE posts SET reactions = ?, comments = ?, updated_at = ? WHERE id = ?').bind(toCount(d.reactions), toCount(d.comments), nowIso(), p.id).run();
+    return json({ ok: true });
+  }
   let clean;
-  try { const u = new URL(String(url || '').trim()); if (!/^https?:$/.test(u.protocol)) throw 0; clean = u.toString(); } catch { return bad('זה לא נראה כמו קישור. צריך להדביק את הכתובת של הפוסט'); }
+  try { const u = new URL(String(d.url || '').trim()); if (!/^https?:$/.test(u.protocol)) throw 0; clean = u.toString(); } catch { return bad('זה לא נראה כמו קישור. צריך להדביק את הכתובת של הפוסט'); }
   await env.DB.prepare('UPDATE posts SET published_url = ?, published_at = COALESCE(published_at, ?), updated_at = ? WHERE id = ?').bind(clean.slice(0, 600), nowIso(), nowIso(), p.id).run();
   await event(env, ctx, 'published', `${p.persona_name} פרסם/ה פוסט: ${p.topic}`, `/personas/${p.persona_slug}`, null);
   return json({ ok: true });
@@ -361,7 +407,10 @@ async function dashboard(env) {
   const topics = (await env.DB.prepare('SELECT * FROM topics WHERE date BETWEEN ? AND ? ORDER BY date LIMIT 8').bind(t, in45).all()).results;
   const newCandidates = (await env.DB.prepare("SELECT COUNT(*) n FROM candidates WHERE status = 'new'").first()).n;
   const activity = (await env.DB.prepare('SELECT * FROM activity ORDER BY id DESC LIMIT 8').all()).results;
+  const overdue = pending.filter((p) => p.sent_at && p.sent_at < ago(3) && (!p.reminded_at || p.reminded_at < ago(3)));
+  const stories = (await env.DB.prepare("SELECT stories.*, personas.name persona_name FROM stories JOIN personas ON personas.slug = stories.persona_slug WHERE stories.status = 'new' ORDER BY stories.id DESC LIMIT 10").all()).results;
   return json({
+    overdue: overdue.map((p) => ({ ...postOut(p), personaPhone: p.persona_phone || '' })), stories,
     personas: personas.map((p) => ({ ...personaOut(p), posts: per[p.slug] || { draft: 0, pending: 0, approved: 0, published: 0 } })),
     pending: pending.map((p) => postOut(p)), upcoming: upcoming.map((p) => postOut(p)), topics, newCandidates, activity,
   });
@@ -375,10 +424,39 @@ async function createPost(request, env) {
   if (!text) fail(400, 'הפוסט ריק');
   const t = nowIso();
   const filename = `${t.slice(0, 10)}_${randomToken(4)}.md`;
-  const r = await env.DB.prepare('INSERT INTO posts (persona_slug, filename, topic, platform, goal, body, status, scheduled_for, voice_score, voice_reason, topic_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
+  const confirm = Array.isArray(d.confirm) ? d.confirm.map((x) => noEmDash(String(x)).slice(0, 300)).filter((x) => x && text.includes(x)).slice(0, 8) : [];
+  const lang = ['he', 'ar', 'ru', 'en'].includes(d.language) ? d.language : 'he';
+  const r = await env.DB.prepare('INSERT INTO posts (persona_slug, filename, topic, platform, goal, body, status, scheduled_for, voice_score, voice_reason, topic_id, confirm_json, medical, language, story_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
     .bind(persona.slug, filename, String(d.topic || '').slice(0, 300), String(d.platform || ''), String(d.goal || '').slice(0, 300), text, 'draft', d.scheduledFor || null,
-      Number.isInteger(d.voiceScore) ? d.voiceScore : null, d.voiceReason || null, d.topicId || null, t, t).run();
-  return json({ ok: true, id: r.meta.last_row_id });
+      Number.isInteger(d.voiceScore) ? d.voiceScore : null, d.voiceReason || null, d.topicId || null, JSON.stringify(confirm), d.medical ? 1 : 0, lang, d.storyId || null, t, t).run();
+  if (d.storyId) await env.DB.prepare("UPDATE stories SET status = 'used' WHERE id = ?").bind(d.storyId).run();
+  return json({ ok: true, id: r.meta.last_row_id, conflicts: d.scheduledFor ? await scheduleConflicts(env, r.meta.last_row_id) : [] });
+}
+
+// Two ambassadors on the same topic the same day reads as a campaign, not as people.
+async function scheduleConflicts(env, id) {
+  const p = await env.DB.prepare('SELECT * FROM posts WHERE id = ?').bind(id).first();
+  if (!p?.scheduled_for) return [];
+  const rows = (await env.DB.prepare(`${POST_SELECT} WHERE posts.id != ? AND posts.scheduled_for = ? AND posts.persona_slug != ? AND ((posts.topic_id IS NOT NULL AND posts.topic_id = ?) OR posts.topic = ?)`)
+    .bind(id, p.scheduled_for, p.persona_slug, p.topic_id, p.topic).all()).results;
+  return rows.map((x) => ({ personaName: x.persona_name, topic: x.topic }));
+}
+
+async function runSafety(env, id) {
+  const post = await env.DB.prepare('SELECT * FROM posts WHERE id = ?').bind(id).first();
+  if (!post) fail(404, 'הפוסט לא נמצא');
+  const persona = await personaFull(env, post.persona_slug);
+  if (!persona) fail(404, 'השגריר/ה לא נמצא/ה');
+  // Boundaries come from the person's own answers when the persona was built from a questionnaire.
+  let boundaries = '';
+  if (persona.candidate_slug) {
+    const c = await env.DB.prepare('SELECT answers_json FROM candidates WHERE slug = ?').bind(persona.candidate_slug).first();
+    if (c) { const a = JSON.parse(c.answers_json || '{}'); boundaries = ['q35', 'q36', 'q37'].map((k) => a[k]).filter((x) => x && x.trim() && x.trim() !== 'לא').join('\n'); }
+  }
+  const flags = await safetyCheck(env, persona, post.body, boundaries);
+  const t = nowIso();
+  await env.DB.prepare('UPDATE posts SET safety_json = ?, safety_at = ? WHERE id = ?').bind(JSON.stringify(flags), t > post.updated_at ? t : post.updated_at, id).run();
+  return flags;
 }
 
 async function updatePost(request, env, id) {
@@ -397,10 +475,17 @@ async function updatePost(request, env, id) {
     sets.push('published_url = ?'); vals.push(url);
     sets.push('published_at = ?'); vals.push(url || d.published ? (p.published_at || nowIso()) : null);
   } else if ('published' in d) { sets.push('published_at = ?'); vals.push(d.published ? (p.published_at || nowIso()) : null); }
+  if ('reactions' in d) { sets.push('reactions = ?'); vals.push(toCount(d.reactions)); }
+  if ('comments' in d) { sets.push('comments = ?'); vals.push(toCount(d.comments)); }
+  if ('feedbackNote' in d) { sets.push('feedback_note = ?'); vals.push(noEmDash(String(d.feedbackNote || '')).slice(0, 1000) || null); }
+  if ('imageId' in d) {
+    if (d.imageId && !(await env.DB.prepare('SELECT 1 FROM assets WHERE id = ? AND consent = 1').bind(d.imageId).first())) fail(400, 'אפשר לצרף רק תמונה שאושרה לשימוש');
+    sets.push('image_id = ?'); vals.push(d.imageId || null);
+  }
   if (!sets.length) return json({ ok: true });
   sets.push('updated_at = ?'); vals.push(nowIso());
   await env.DB.prepare(`UPDATE posts SET ${sets.join(', ')} WHERE id = ?`).bind(...vals, id).run();
-  return json({ ok: true });
+  return json({ ok: true, conflicts: 'scheduledFor' in d ? await scheduleConflicts(env, id) : [] });
 }
 
 // Moves a post to "waiting for the ambassador". The existing token is kept, so a link already
@@ -424,14 +509,20 @@ async function generate(request, env) {
     const topic = await env.DB.prepare('SELECT * FROM topics WHERE id = ?').bind(d.topicId).first();
     if (topic) context = [topic.title, topic.date, topic.angle, topic.notes].filter(Boolean).join(' · ');
   }
+  let story = '';
+  if (d.storyId) {
+    const s = await env.DB.prepare('SELECT * FROM stories WHERE id = ?').bind(d.storyId).first();
+    if (s && slugs.includes(s.persona_slug)) story = s.text;
+  }
   const results = await Promise.all(slugs.map(async (slug) => {
     const persona = await personaFull(env, slug);
     if (!persona) return { slug, error: 'השגריר/ה לא נמצא/ה' };
     try {
-      const variants = await generateVariants(env, persona, { platform: d.platform, topic: d.topic, angle: d.angle, tone: d.tone, context });
+      const language = ['he', 'ar', 'ru', 'en'].includes(d.language) ? d.language : (persona.language || 'he');
+      const variants = await generateVariants(env, persona, { platform: d.platform, topic: d.topic, angle: d.angle, tone: d.tone, context, language, story });
       let scores = variants.map(() => ({ score: null, reason: '' }));
       try { scores = await scoreVariants(env, persona, variants); } catch { /* the variants are still usable without a score */ }
-      return { slug, name: persona.name, variants: variants.map((v, i) => ({ ...v, ...scores[i] })) };
+      return { slug, name: persona.name, language, variants: variants.map((v, i) => ({ ...v, ...scores[i] })) };
     } catch (e) {
       return { slug, name: persona.name, error: e.message || 'היצירה נכשלה' };
     }
@@ -449,8 +540,8 @@ async function savePersonaFromCandidate(request, env, ctx, slug) {
   const pslug = await uniqueSlug(env, 'personas', slugify(c.english_name) || slugify(c.name) || `persona-${randomToken(3)}`);
   const t = nowIso();
   await env.DB.batch([
-    env.DB.prepare('INSERT INTO personas (slug, name, english_name, role, company, profile_md, training_status, origin, candidate_slug, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-      .bind(pslug, fm.name || c.name, c.english_name, fm.role || c.role, fm.company || c.company, md, fm['training-status'] || 'draft', 'app', c.slug, t, t),
+    env.DB.prepare('INSERT INTO personas (slug, name, english_name, role, company, profile_md, training_status, origin, candidate_slug, language, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
+      .bind(pslug, fm.name || c.name, c.english_name, fm.role || c.role, fm.company || c.company, md, fm['training-status'] || 'draft', 'app', c.slug, c.language || 'he', t, t),
     env.DB.prepare("UPDATE candidates SET status = 'persona-created' WHERE slug = ?").bind(c.slug),
   ]);
   await logActivity(env, 'persona', `נוצרה פרסונה חדשה: ${fm.name || c.name}`, `/personas/${pslug}`);
@@ -487,7 +578,7 @@ async function uploadImage(request, env, slug) {
 }
 
 async function media(env, key, request) {
-  if (!key.startsWith('personas/')) fail(404, 'לא נמצא');
+  if (!key.startsWith('personas/') && !key.startsWith('assets/')) fail(404, 'לא נמצא');
   const range = request.headers.get('range');
   const obj = await env.MEDIA.get(key, range ? { range: request.headers } : undefined);
   if (!obj) fail(404, 'לא נמצא');
@@ -522,6 +613,115 @@ async function topicSave(request, env, id) {
   if (id) await env.DB.prepare('UPDATE topics SET date = ?, title = ?, kind = ?, angle = ?, notes = ? WHERE id = ?').bind(date, title, kind, angle, notes, id).run();
   else await env.DB.prepare('INSERT INTO topics (date, title, kind, angle, notes, created_at) VALUES (?,?,?,?,?,?)').bind(date, title, kind, angle, notes, nowIso()).run();
   return json({ ok: true });
+}
+
+// ---------- settings ----------
+const SETTING_KEYS = ['disclaimer', 'contact_name', 'contact_role', 'contact_email', 'contact_phone', 'link_default_url'];
+const SETTING_DEFAULTS = { disclaimer: 'הדעות כאן שלי, ואינן ייעוץ רפואי אישי.' };
+async function getSettings(env) {
+  const out = { ...SETTING_DEFAULTS };
+  for (const row of (await env.DB.prepare('SELECT key, value FROM settings').all()).results) out[row.key] = row.value;
+  return out;
+}
+const setSetting = (env, k, v) => env.DB.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').bind(k, v).run();
+
+// ---------- tracking links (public) ----------
+// Link-preview fetchers open every link once when it is posted; they are not people.
+const BOT_UA = /bot|crawl|spider|preview|facebookexternalhit|linkedin|slack|whatsapp|telegram|discord|embed/i;
+async function trackRedirect(request, env, ctx, code) {
+  const link = await env.DB.prepare('SELECT * FROM links WHERE code = ?').bind(code).first();
+  if (!link) return new Response('הקישור לא נמצא', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+  if (!BOT_UA.test(request.headers.get('user-agent') || '')) {
+    ctx.waitUntil(env.DB.batch([
+      env.DB.prepare('UPDATE links SET clicks = clicks + 1 WHERE code = ?').bind(code),
+      env.DB.prepare('INSERT INTO clicks (code, at) VALUES (?, ?)').bind(code, nowIso()),
+    ]));
+  }
+  return new Response(null, { status: 302, headers: { location: link.target_url, 'cache-control': 'no-store' } });
+}
+
+// ---------- stories (public, by personal link) ----------
+async function storyPersona(env, token) {
+  if (!/^[a-f0-9]{32}$/.test(token || '')) return null;
+  return env.DB.prepare('SELECT slug, name, language FROM personas WHERE story_token = ?').bind(token).first();
+}
+async function submitStory(request, env, ctx, token) {
+  const { count } = await bump(env, `story:${clientIp(request)}`, 3_600_000, 20, 0);
+  if (count > 20) return bad('נשלחו יותר מדי סיפורים בשעה האחרונה. אפשר לנסות שוב מאוחר יותר', 429);
+  const persona = await storyPersona(env, token);
+  if (!persona) return bad('הקישור אינו תקף', 404);
+  const d = await body(request);
+  if (d.website) return json({ ok: true });
+  const text = noEmDash(String(d.text || '').trim()).slice(0, 8000);
+  if (text.length < 10) return bad('הסיפור קצר מדי. אפשר לכתוב עוד משפט או שניים');
+  await env.DB.prepare('INSERT INTO stories (persona_slug, text, created_at) VALUES (?,?,?)').bind(persona.slug, text, nowIso()).run();
+  await event(env, ctx, 'story', `${persona.name} שלח/ה סיפור חדש`, `/personas/${persona.slug}?tab=stories`, 'סיפור חדש מאחד השגרירים מחכה במערכת.');
+  return json({ ok: true });
+}
+
+async function reviewImage(env, token) {
+  const p = await reviewTarget(env, token);
+  if (!p?.image_id || !['pending', 'approved'].includes(p.status)) return bad('לא נמצא', 404);
+  const a = await env.DB.prepare('SELECT * FROM assets WHERE id = ? AND consent = 1').bind(p.image_id).first();
+  if (!a) return bad('לא נמצא', 404);
+  const obj = await env.MEDIA.get(a.key);
+  if (!obj) return bad('לא נמצא', 404);
+  const headers = new Headers({ 'cache-control': 'private, max-age=3600', 'content-disposition': `inline; filename="image.${a.key.split('.').pop()}"` });
+  obj.writeHttpMetadata(headers);
+  return new Response(obj.body, { headers });
+}
+
+// ---------- summaries ----------
+const ago = (days) => new Date(Date.now() - days * DAY).toISOString();
+async function summary(env, url) {
+  const days = Math.min(31, Math.max(1, Number(url.searchParams.get('days')) || 7));
+  const since = ago(days);
+  const personas = (await env.DB.prepare('SELECT * FROM personas ORDER BY created_at').all()).results;
+  const out = [];
+  for (const p of personas) {
+    const approved = (await env.DB.prepare('SELECT topic, published_at, link_code FROM posts WHERE persona_slug = ? AND approved_at >= ?').bind(p.slug, since).all()).results;
+    const published = (await env.DB.prepare('SELECT topic, reactions, comments FROM posts WHERE persona_slug = ? AND published_at >= ?').bind(p.slug, since).all()).results;
+    const clicks = (await env.DB.prepare('SELECT COUNT(*) n FROM clicks JOIN links ON links.code = clicks.code WHERE links.persona_slug = ? AND clicks.at >= ?').bind(p.slug, since).first()).n;
+    const pending = (await env.DB.prepare("SELECT COUNT(*) n FROM posts WHERE persona_slug = ? AND status = 'pending'").bind(p.slug).first()).n;
+    out.push({ slug: p.slug, name: p.name, phone: p.phone || '', approved, published, clicks, pending });
+  }
+  return json({ days, since, personas: out });
+}
+
+async function report(env, url) {
+  const month = /^\d{4}-\d{2}$/.test(url.searchParams.get('month') || '') ? url.searchParams.get('month') : new Date().toISOString().slice(0, 7);
+  const from = `${month}-01`, to = `${month}-31T99`;
+  const q = (sql, ...b) => env.DB.prepare(sql).bind(...b);
+  // Posts approved before the edit rate existed get it computed once from the two stored versions.
+  for (const x of (await env.DB.prepare("SELECT id, body, original_body, edited FROM posts WHERE status = 'approved' AND edit_ratio IS NULL").all()).results) {
+    await env.DB.prepare('UPDATE posts SET edit_ratio = ? WHERE id = ?').bind(x.edited && x.original_body ? editRatio(x.original_body, x.body) : 0, x.id).run();
+  }
+  const personas = (await env.DB.prepare('SELECT slug, name, role FROM personas ORDER BY created_at').all()).results;
+  const rows = [];
+  for (const p of personas) {
+    const s = await q(`SELECT
+      SUM(created_at BETWEEN ?1 AND ?2) created, SUM(sent_at BETWEEN ?1 AND ?2) sent, SUM(approved_at BETWEEN ?1 AND ?2) approved,
+      SUM(approved_at BETWEEN ?1 AND ?2 AND edited = 1) edited, AVG(CASE WHEN approved_at BETWEEN ?1 AND ?2 THEN edit_ratio END) edit_ratio,
+      SUM(published_at BETWEEN ?1 AND ?2) published, SUM(CASE WHEN published_at BETWEEN ?1 AND ?2 THEN reactions END) reactions,
+      SUM(CASE WHEN published_at BETWEEN ?1 AND ?2 THEN comments END) comments FROM posts WHERE persona_slug = ?3`, from, to, p.slug).first();
+    const clicks = (await q('SELECT COUNT(*) n FROM clicks JOIN links ON links.code = clicks.code WHERE links.persona_slug = ? AND clicks.at BETWEEN ? AND ?', p.slug, from, to).first()).n;
+    // Six months of edit rate, so the trend of the voice quality is visible.
+    const trend = (await q("SELECT substr(approved_at,1,7) m, AVG(edit_ratio) r, COUNT(*) n FROM posts WHERE persona_slug = ? AND approved_at IS NOT NULL AND edit_ratio IS NOT NULL GROUP BY m ORDER BY m DESC LIMIT 6", p.slug).all()).results.reverse();
+    rows.push({ slug: p.slug, name: p.name, role: p.role, ...Object.fromEntries(Object.entries(s).map(([k, v]) => [k, v ?? 0])), clicks, trend });
+  }
+  const candidates = (await q('SELECT COUNT(*) n FROM candidates WHERE submitted_at BETWEEN ? AND ?', from, to).first()).n;
+  const stories = (await q('SELECT COUNT(*) n FROM stories WHERE created_at BETWEEN ? AND ?', from, to).first()).n;
+  return json({ month, personas: rows, candidates, stories });
+}
+
+// Posts that waited three days for approval are surfaced once, so nobody has to remember to look.
+async function overdueSweep(env) {
+  const rows = (await env.DB.prepare(`${POST_SELECT} WHERE posts.status = 'pending' AND posts.sent_at < ? AND posts.overdue_notified IS NULL`).bind(ago(3)).all()).results;
+  for (const p of rows) {
+    await env.DB.prepare('UPDATE posts SET overdue_notified = ? WHERE id = ?').bind(nowIso(), p.id).run();
+    await logActivity(env, 'overdue', `${p.persona_name} עוד לא אישר/ה פוסט שנשלח לפני 3 ימים: ${p.topic}`, '/');
+    await notify(env, 'פוסט מחכה לאישור כבר 3 ימים', `${p.persona_name}: ${p.topic}`, '/');
+  }
 }
 
 // ---------- router ----------
@@ -619,6 +819,102 @@ async function admin(request, env, ctx, url) {
     return json({ lesson: await voiceLesson(env, persona, post.original_body, post.body) });
   }
 
+  // ----- persona details, story link -----
+  if ((r = p.match(/^\/api\/personas\/([a-z0-9-]+)\/details$/)) && m === 'PATCH') {
+    const d = await body(request);
+    const phone = d.phone ? normalizePhone(d.phone) : '';
+    if (d.phone && !phone) fail(400, 'מספר הטלפון לא נראה תקין');
+    const lang = ['he', 'ar', 'ru', 'en'].includes(d.language) ? d.language : 'he';
+    await env.DB.prepare('UPDATE personas SET phone = ?, language = ?, updated_at = ? WHERE slug = ?').bind(phone || null, lang, nowIso(), r[1]).run();
+    return json({ ok: true });
+  }
+  if ((r = p.match(/^\/api\/personas\/([a-z0-9-]+)\/story-link$/)) && m === 'POST') {
+    const pf = await env.DB.prepare('SELECT story_token FROM personas WHERE slug = ?').bind(r[1]).first();
+    if (!pf) fail(404, 'השגריר/ה לא נמצא/ה');
+    const token = pf.story_token || randomToken(16);
+    if (!pf.story_token) await env.DB.prepare('UPDATE personas SET story_token = ? WHERE slug = ?').bind(token, r[1]).run();
+    return json({ ok: true, url: `${base}/story/${token}` });
+  }
+  if ((r = p.match(/^\/api\/personas\/([a-z0-9-]+)\/stories$/)) && m === 'GET') {
+    return json((await env.DB.prepare('SELECT * FROM stories WHERE persona_slug = ? ORDER BY id DESC').bind(r[1]).all()).results);
+  }
+  if ((r = p.match(/^\/api\/stories\/(\d+)$/))) {
+    if (m === 'GET') { const s = await env.DB.prepare('SELECT * FROM stories WHERE id = ?').bind(Number(r[1])).first(); if (!s) fail(404, 'הסיפור לא נמצא'); return json(s); }
+    if (m === 'PATCH') { const { status } = await body(request); if (!['new', 'used', 'archived'].includes(status)) fail(400, 'סטטוס לא מוכר'); await env.DB.prepare('UPDATE stories SET status = ? WHERE id = ?').bind(status, Number(r[1])).run(); return json({ ok: true }); }
+    if (m === 'DELETE') { await env.DB.prepare('DELETE FROM stories WHERE id = ?').bind(Number(r[1])).run(); return json({ ok: true }); }
+  }
+
+  // ----- safety check, tracking link, reminders -----
+  if ((r = p.match(/^\/api\/posts\/(\d+)\/check$/)) && m === 'POST') return json({ flags: await runSafety(env, Number(r[1])) });
+  if ((r = p.match(/^\/api\/posts\/(\d+)\/link$/)) && m === 'POST') {
+    const post = await postById(env, Number(r[1]));
+    const { target } = await body(request);
+    let url;
+    try { const u = new URL(String(target || '').trim()); if (!/^https?:$/.test(u.protocol)) throw 0; url = u; } catch { fail(400, 'כתובת היעד לא תקינה'); }
+    // Campaign tags so the destination's own analytics can count the program too.
+    url.searchParams.set('utm_source', 'ambassadors'); url.searchParams.set('utm_medium', 'social'); url.searchParams.set('utm_content', post.persona_slug);
+    const code = post.link_code || randomToken(4);
+    if (post.link_code) await env.DB.prepare('UPDATE links SET target_url = ? WHERE code = ?').bind(url.toString(), code).run();
+    else {
+      await env.DB.batch([
+        env.DB.prepare('INSERT INTO links (code, post_id, persona_slug, target_url, created_at) VALUES (?,?,?,?,?)').bind(code, post.id, post.persona_slug, url.toString(), nowIso()),
+        env.DB.prepare('UPDATE posts SET link_code = ? WHERE id = ?').bind(code, post.id),
+      ]);
+    }
+    await setSetting(env, 'link_default_url', String(target).trim());
+    return json({ ok: true, url: `${base}/r/${code}` });
+  }
+  if ((r = p.match(/^\/api\/posts\/(\d+)\/reminded$/)) && m === 'POST') {
+    await env.DB.prepare('UPDATE posts SET reminded_at = ? WHERE id = ?').bind(nowIso(), Number(r[1])).run();
+    return json({ ok: true });
+  }
+
+  // ----- image bank -----
+  if (p === '/api/assets' && m === 'GET') {
+    const rows = (await env.DB.prepare('SELECT * FROM assets ORDER BY id DESC').all()).results;
+    return json(rows.map((a) => ({ id: a.id, title: a.title, notes: a.notes, consent: !!a.consent, url: `/api/media/${encodeURIComponent(a.key)}`, createdAt: a.created_at })));
+  }
+  if (p === '/api/assets' && m === 'POST') {
+    const form = await request.formData();
+    const file = form.get('image');
+    if (!file || typeof file === 'string') fail(400, 'לא נבחרה תמונה');
+    if (file.size > 10 * 1024 * 1024) fail(400, 'התמונה גדולה מדי, עד 10MB');
+    const ext = IMAGE_TYPES[file.type];
+    if (!ext) fail(400, 'אפשר להעלות PNG, JPG או WEBP');
+    const key = `assets/${Date.now()}-${randomToken(3)}.${ext}`;
+    await env.MEDIA.put(key, file.stream(), { httpMetadata: { contentType: file.type } });
+    await env.DB.prepare('INSERT INTO assets (key, title, notes, consent, created_at) VALUES (?,?,?,?,?)')
+      .bind(key, noEmDash(String(form.get('title') || '')).slice(0, 200), noEmDash(String(form.get('notes') || '')).slice(0, 1000), form.get('consent') === '1' ? 1 : 0, nowIso()).run();
+    return json({ ok: true });
+  }
+  if ((r = p.match(/^\/api\/assets\/(\d+)$/))) {
+    const a = await env.DB.prepare('SELECT * FROM assets WHERE id = ?').bind(Number(r[1])).first();
+    if (!a) fail(404, 'התמונה לא נמצאה');
+    if (m === 'PATCH') {
+      const d = await body(request);
+      await env.DB.prepare('UPDATE assets SET title = ?, notes = ?, consent = ? WHERE id = ?').bind(noEmDash(String(d.title ?? a.title)).slice(0, 200), noEmDash(String(d.notes ?? a.notes)).slice(0, 1000), d.consent === undefined ? a.consent : (d.consent ? 1 : 0), a.id).run();
+      if (d.consent === false) await env.DB.prepare('UPDATE posts SET image_id = NULL WHERE image_id = ?').bind(a.id).run();
+      return json({ ok: true });
+    }
+    if (m === 'DELETE') {
+      await env.DB.batch([env.DB.prepare('DELETE FROM assets WHERE id = ?').bind(a.id), env.DB.prepare('UPDATE posts SET image_id = NULL WHERE image_id = ?').bind(a.id)]);
+      await env.MEDIA.delete(a.key);
+      return json({ ok: true });
+    }
+  }
+
+  // ----- settings -----
+  if (p === '/api/settings' && m === 'GET') return json(await getSettings(env));
+  if (p === '/api/settings' && m === 'PATCH') {
+    const d = await body(request);
+    for (const k of SETTING_KEYS) if (k in d) await setSetting(env, k, noEmDash(String(d[k] || '')).slice(0, 1000));
+    return json({ ok: true });
+  }
+
+  // ----- summaries and reports -----
+  if (p === '/api/summary') return summary(env, url);
+  if (p === '/api/report') return report(env, url);
+
   if (p === '/api/calendar') return calendar(env, url);
   if (p === '/api/topics' && m === 'GET') {
     const from = url.searchParams.get('from') || today();
@@ -678,6 +974,8 @@ async function route(request, env, ctx) {
     return Response.redirect(`https://${env.CANONICAL_HOST}${p}${url.search}`, 301);
   }
 
+  let tr;
+  if ((tr = p.match(/^\/r\/([a-f0-9]{8})$/))) return trackRedirect(request, env, ctx, tr[1]);
   if (!p.startsWith('/api/')) {
     // Every page is the same app shell; the browser decides what to draw.
     return env.ASSETS.fetch(new Request(new URL('/index.html', url), request));
@@ -700,6 +998,11 @@ async function route(request, env, ctx) {
     if (m === 'POST') return approveReview(request, env, ctx, r[1]);
   }
   if ((r = p.match(/^\/api\/public\/review\/([a-f0-9]{32})\/published$/)) && m === 'POST') return reviewPublished(request, env, ctx, r[1]);
+  if ((r = p.match(/^\/api\/public\/review\/([a-f0-9]{32})\/image$/)) && m === 'GET') return reviewImage(env, r[1]);
+  if ((r = p.match(/^\/api\/public\/story\/([a-f0-9]{32})$/))) {
+    if (m === 'GET') { const ps = await storyPersona(env, r[1]); return ps ? json({ name: ps.name, language: ps.language || 'he' }) : bad('הקישור אינו תקף', 404); }
+    if (m === 'POST') return submitStory(request, env, ctx, r[1]);
+  }
 
   if (!(await isAuthed(request, env))) return bad('נדרשת התחברות', 401);
   return admin(request, env, ctx, url);
@@ -732,6 +1035,7 @@ export default {
       // Not logged to the activity feed: a daily line would bury the events that matter.
       // The backup screen lists every stored copy.
       await backupToR2(env);
+      await overdueSweep(env);
       await env.DB.prepare('DELETE FROM throttle WHERE window_start < ? AND locked_until < ?').bind(Date.now() - DAY, Date.now()).run();
     })());
   },
