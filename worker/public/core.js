@@ -122,6 +122,7 @@ async function checkAuth() {
 
 const NAV = [
   { href: '/', label: 'לוח בקרה', ic: 'layout-dashboard', match: /^\/$/ },
+  { href: '/help', label: 'הוראות', ic: 'book-open', match: /^\/help/ },
   { href: '/personas', label: 'שגרירים', ic: 'users', match: /^\/personas/ },
   { href: '/generate', label: 'יצירת פוסט', ic: 'sparkles', match: /^\/generate/ },
   { href: '/calendar', label: 'לוח פרסומים', ic: 'calendar-days', match: /^\/calendar/ },
