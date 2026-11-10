@@ -1,0 +1,17 @@
+{
+  "name": "ambassador-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "import": "node scripts/import.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.7.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "wrangler": "^4.159.0"
+  }
+}

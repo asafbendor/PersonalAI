@@ -1,0 +1,25 @@
+{
+  "name": "ambassador",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "ambassador", "database_id": "88702dfc-daf0-47b4-a968-7c65ca092450" }
+  ],
+  "r2_buckets": [
+    { "binding": "MEDIA", "bucket_name": "ambassador-media" }
+  ],
+  // Daily backup of every table to R2, 03:00 Israel time (UTC+2/3).
+  "triggers": { "crons": ["0 0 * * *"] },
+  "observability": { "enabled": true }
+  // Secrets (set with `wrangler secret put`, never in this file):
+  //   DASHBOARD_PASSWORD, SESSION_SECRET, ANTHROPIC_API_KEY
+  // Optional: BREVO_API_KEY + NOTIFY_EMAIL (+ NOTIFY_FROM) for email alerts,
+  //   TURNSTILE_SITE_KEY + TURNSTILE_SECRET for the questionnaire, CANONICAL_HOST, PUBLIC_URL.
+}

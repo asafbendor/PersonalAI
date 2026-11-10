@@ -94,8 +94,24 @@ Railway נשאר חי עד שאסף בדק את האתר החדש ואישר. ר
 עיצוב חדש לפי "Clalit Design System": טורקיז מוביל, פינות ישרות, כפתורי גלולה בלבד,
 פס חמשת הצבעים, בלי הדרגות צבע ובלי צללים.
 
+## האתר החדש בקלאודפלייר (נבנה 10 בנובמבר 2026)
+
+- הקוד: `worker/`. Worker אחד (`src/index.js`, `src/ai.js`) שמגיש גם את הממשק (`public/`, JS רגיל בלי בנייה).
+- כתובת: https://ambassador.asaf-bendor-e90.workers.dev . תת-דומיין ambassador.goai.co.il עוד לא חובר (מחכה לאישור של אסף).
+- נתונים: D1 `ambassador` (הסכמה ב-`db/schema.sql`), תמונות וסרטון ב-R2 `ambassador-media` תחת `personas/`, גיבוי יומי (Cron, 00:00 UTC) ל-R2 תחת `backups/`, 60 אחרונים.
+- סודות (wrangler secret): DASHBOARD_PASSWORD (העותק ב-`C:\Users\HP\secrets\ambassador\dashboard-password-proposed.txt`), SESSION_SECRET, ANTHROPIC_API_KEY. אופציונלי: BREVO_API_KEY + NOTIFY_EMAIL להתראות במייל, TURNSTILE_SITE_KEY + TURNSTILE_SECRET לשאלון.
+- פריסה: `cd worker` ואז `npx wrangler deploy`. push ל-main עדיין מפרסם את Railway, לא את קלאודפלייר.
+- ייבוא חד פעמי מ-Railway: `node scripts/import.mjs <backup.json> --remote`. כותב קבצים זמניים עם מידע אישי ל-`scripts/out/` (מחוץ ל-git), למחוק אחרי.
+- מודל: claude-opus-5-5. שלוש גרסאות לכל פוסט + קריאה נפרדת שנותנת ציון דמיון לקול. המייל של המועמד לא נשלח ל-AI.
+
 ## נתוני אדמין
 
-ימולא אחרי המעבר ל-D1: שאילתות קריאה מוכנות (כמה מועמדים, פוסטים לפי סטטוס,
-פוסטים שממתינים לאישור יותר משבוע, קצב אישורים לפי שגריר/ה).
-עד אז הנתונים הם קבצים על ה-Volume, והדרך לקרוא אותם היא קובץ הגיבוי.
+קריאה בלבד, בלי פרטים מזהים. מתוך `worker/`:
+
+```
+npx wrangler d1 execute ambassador --remote --command "SELECT (SELECT COUNT(*) FROM personas) personas, (SELECT COUNT(*) FROM candidates) candidates, (SELECT COUNT(*) FROM candidates WHERE status='new') new_candidates, (SELECT COUNT(*) FROM posts) posts"
+npx wrangler d1 execute ambassador --remote --command "SELECT status, COUNT(*) n, SUM(published_at IS NOT NULL) published FROM posts GROUP BY status"
+npx wrangler d1 execute ambassador --remote --command "SELECT persona_slug, COUNT(*) sent, SUM(status='approved') approved, SUM(edited) edited FROM posts WHERE sent_at IS NOT NULL GROUP BY persona_slug"
+npx wrangler d1 execute ambassador --remote --command "SELECT COUNT(*) waiting_over_week FROM posts WHERE status='pending' AND sent_at < datetime('now','-7 days')"
+npx wrangler d1 execute ambassador --remote --command "SELECT substr(submitted_at,1,7) month, COUNT(*) n FROM candidates GROUP BY month"
+```
