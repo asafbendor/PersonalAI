@@ -1,7 +1,7 @@
 // The pages people outside the team see: the candidate questionnaire, the ambassador's review
 // page, and the personal story link. No navigation, nothing that hints an admin area exists.
 // Hebrew, Arabic and Russian; Arabic and Russian still need a native speaker's review.
-import { $, $$, esc, icon, stripe, api, on, copyText, busy, toast } from '/core.js';
+import { $, $$, esc, icon, stripe, api, on, copyText, busy, toast, modal } from '/core.js';
 import { TOTAL_QUESTIONS } from '/questionnaire.js';
 import { LANGS, t, sectionsFor, speechLang } from '/i18n.js';
 
@@ -235,6 +235,7 @@ on('/review/([a-f0-9]{32})', async (root, token) => {
     <p class="lead">${esc(L.rLead)}</p>
     ${data.topic || data.platform ? `<div class="note" style="margin-top:20px">${icon('info')}<div>${data.topic ? `<b>${esc(L.topic)}</b> ${esc(data.topic)}` : ''}${data.topic && data.platform ? '<br>' : ''}${data.platform ? `<b>${esc(L.forNet)}</b> ${esc(data.platform)}` : ''}</div></div>` : ''}
     ${data.confirm?.length ? `<div class="note warn" style="margin-top:16px">${icon('circle-alert')}<div><b>${esc(L.confirmT)}</b><div class="small" style="margin-top:4px">${esc(L.confirm)}</div><ul class="confirm">${data.confirm.map((c) => `<li>"${esc(c)}"</li>`).join('')}</ul></div></div>` : ''}
+    ${data.versions?.length > 1 ? `<div class="field" style="margin-top:24px"><span>${esc(L.versionsT)}</span><p class="small muted" style="margin-bottom:4px">${esc(L.versionsHint)}</p><div class="toggles" id="vers">${data.versions.map((v, i) => `<button type="button" class="toggle ${i === 0 ? 'on' : ''}" aria-pressed="${i === 0}" data-ver="${i}">${esc(L.version)} ${i + 1}</button>`).join('')}</div></div>` : ''}
     <label class="field reviewtext"><span>${esc(L.text)}</span><textarea class="textarea" id="txt">${esc(data.body)}</textarea></label>
     <p class="small" id="changed" style="color:var(--teal);margin-top:8px;display:none">${esc(L.changed)}</p>
     ${data.hasImage ? `<div class="card" style="margin-top:20px"><header><h3>${esc(L.imageT)}</h3></header><div class="body"><img class="postimg" src="/api/public/review/${token}/image" alt=""></div></div>` : ''}
@@ -242,8 +243,20 @@ on('/review/([a-f0-9]{32})', async (root, token) => {
     <div class="btns" style="margin-top:24px"><button type="button" class="btn go wide" id="ok">${icon('check')}<span>${esc(L.approve)}</span></button></div>
     <p class="xs muted" style="margin-top:12px">${esc(L.notForMe)}</p>`;
   const txt = $('#txt'), btn = $('#ok');
+  let ver = 0;
+  const base = () => (data.versions?.[ver] ?? data.body);
+  $$('[data-ver]').forEach((b) => {
+    b.onclick = async () => {
+      const n = Number(b.dataset.ver);
+      if (n === ver) return;
+      if (txt.value.trim() !== base().trim() && !(await modal({ title: L.versionLose, narrow: true, body: '', actions: [{ label: L.back, cls: 'ghost', value: false }, { label: `${L.version} ${n + 1}`, value: true }] }))) return;
+      ver = n; txt.value = base();
+      $$('[data-ver]').forEach((x) => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b); });
+      txt.oninput();
+    };
+  });
   txt.oninput = () => {
-    const ch = txt.value.trim() !== data.body.trim();
+    const ch = txt.value.trim() !== base().trim();
     $('#changed').style.display = ch ? 'block' : 'none';
     btn.querySelector('span').textContent = ch ? L.approveEdit : L.approve;
     btn.disabled = !txt.value.trim();
@@ -252,7 +265,7 @@ on('/review/([a-f0-9]{32})', async (root, token) => {
     busy(btn, true, L.saving);
     $('#err').textContent = '';
     try {
-      const r = await api(`/public/review/${token}`, { body: { content: txt.value } });
+      const r = await api(`/public/review/${token}`, { body: { content: txt.value, version: ver } });
       approved(main, token, { ...data, body: r.body, edited: r.edited, justApproved: true }, L);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) { $('#err').textContent = e.message; busy(btn, false); }
@@ -279,6 +292,7 @@ function approved(main, token, data, L) {
     ${data.publishedUrl ? `<div class="card" style="margin-top:24px"><header><h3>${esc(L.howT)}</h3><p>${esc(L.howHint)}</p></header><div class="body">
       <div class="grid g2" style="gap:0 16px"><label class="field" style="margin-top:0"><span>${esc(L.reactions)}</span><input class="input" id="rx" type="number" min="0" inputmode="numeric" value="${data.reactions ?? ''}"></label>
       <label class="field" style="margin-top:0"><span>${esc(L.comments)}</span><input class="input" id="cm" type="number" min="0" inputmode="numeric" value="${data.comments ?? ''}"></label></div>
+      <label class="field"><span>${esc(L.impressions)}</span><input class="input" id="im" type="number" min="0" inputmode="numeric" value="${data.impressions ?? ''}"><span class="hint">${esc(L.impressionsHint)}</span></label>
       <div class="btns" style="margin-top:14px"><button type="button" class="btn ghost" id="nsave">${esc(L.saveNums)}</button></div></div></div>` : ''}`;
   $('#copy').onclick = async () => { if (await copyText(data.body)) toast(L.copied); };
   $('#cplink')?.addEventListener('click', async () => { if (await copyText(track)) toast(L.linkCopied); });
@@ -297,7 +311,7 @@ function approved(main, token, data, L) {
   });
   $('#nsave')?.addEventListener('click', async (e) => {
     busy(e.currentTarget, true, L.saving);
-    try { await api(`/public/review/${token}/published`, { body: { reactions: $('#rx').value, comments: $('#cm').value } }); toast(L.numsSaved); } catch (err) { toast(err.message, 'circle-alert'); }
+    try { await api(`/public/review/${token}/published`, { body: { reactions: $('#rx').value, comments: $('#cm').value, impressions: $('#im').value } }); toast(L.numsSaved); } catch (err) { toast(err.message, 'circle-alert'); }
     busy(e.currentTarget, false);
   });
 }

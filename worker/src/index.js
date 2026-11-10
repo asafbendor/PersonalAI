@@ -9,7 +9,7 @@
 //   from the dashboard reopens it.
 // - Question ids are permanent.
 // - Nothing is indexed by search engines.
-import { generateVariants, scoreVariants, personaDraft, voiceLesson, safetyCheck, noEmDash } from './ai.js';
+import { generateVariants, scoreVariants, personaDraft, voiceLesson, safetyCheck, profileKit, noEmDash } from './ai.js';
 import { QUESTIONNAIRE_SECTIONS, TOTAL_QUESTIONS } from '../public/questionnaire.js';
 
 const DAY = 86_400_000;
@@ -213,6 +213,7 @@ function personaOut(p) {
     video: p.video_key ? `/api/media/${encodeURIComponent(p.video_key)}` : null,
     updatedAt: p.updated_at, phone: p.phone || '', language: p.language || 'he',
     storyPath: p.story_token ? `/story/${p.story_token}` : null, candidateSlug: p.candidate_slug,
+    profileKit: p.profile_kit_json ? JSON.parse(p.profile_kit_json) : null,
   };
 }
 function postOut(p, base = '') {
@@ -228,7 +229,8 @@ function postOut(p, base = '') {
     safety: p.safety_json ? JSON.parse(p.safety_json) : null, safetyAt: p.safety_at, safetyStale: !!(p.safety_at && p.updated_at > p.safety_at && p.status !== 'approved'),
     confirm: p.confirm_json ? JSON.parse(p.confirm_json) : [],
     trackUrl: p.link_code ? `${base}/r/${p.link_code}` : null, clicks: p.link_clicks ?? null,
-    editRatio: p.edit_ratio, reactions: p.reactions, comments: p.comments, feedbackNote: p.feedback_note,
+    editRatio: p.edit_ratio, reactions: p.reactions, comments: p.comments, feedbackNote: p.feedback_note, impressions: p.impressions,
+    alternatives: p.alternatives_json ? JSON.parse(p.alternatives_json) : [],
     remindedAt: p.reminded_at,
   };
 }
@@ -343,7 +345,8 @@ async function getReview(env, token) {
     confirm: p.confirm_json ? JSON.parse(p.confirm_json) : [], hasImage: !!p.image_id,
     trackPath: p.link_code ? `/r/${p.link_code}` : null,
   };
-  if (p.status === 'approved') return json({ state: 'approved', ...base, edited: !!p.edited, publishedUrl: p.published_url, reactions: p.reactions, comments: p.comments, feedbackNote: p.feedback_note });
+  if (p.status === 'approved') return json({ state: 'approved', ...base, edited: !!p.edited, publishedUrl: p.published_url, reactions: p.reactions, comments: p.comments, impressions: p.impressions, feedbackNote: p.feedback_note });
+  base.versions = [p.body, ...(p.alternatives_json ? JSON.parse(p.alternatives_json) : [])];
   if (p.status !== 'pending') return json({ state: 'invalid' }, 404);
   if (p.token_expires_at && p.token_expires_at < nowIso()) return json({ state: 'expired', personaName: p.persona_name }, 410);
   return json({ state: 'pending', ...base });
@@ -359,10 +362,12 @@ async function approveReview(request, env, ctx, token) {
   if (p.status !== 'pending') return bad('הקישור אינו תקף', 404);
   if (p.token_expires_at && p.token_expires_at < nowIso()) return bad('תוקף הקישור פג. אפשר לבקש קישור חדש ממי ששלח/ה אותו', 410);
 
-  const { content } = await body(request);
+  const { content, version } = await body(request);
   const submitted = noEmDash(String(content || '').trim());
   if (!submitted) return bad('הפוסט ריק');
-  const original = p.body.trim();
+  // The ambassador may have picked one of the other versions; edits are measured against the one they picked.
+  const versions = [p.body, ...(p.alternatives_json ? JSON.parse(p.alternatives_json) : [])];
+  const original = String(versions[Number.isInteger(version) && versions[version] ? version : 0]).trim();
   const edited = submitted !== original;
   const t = nowIso();
   // The guarded UPDATE makes a double click or two open tabs harmless.
@@ -379,8 +384,8 @@ async function reviewPublished(request, env, ctx, token) {
   if (!p || p.status !== 'approved') return bad('אפשר לסמן פרסום רק אחרי אישור', 400);
   const d = await body(request);
   // Numbers only: how the post did, as the ambassador sees it on the network.
-  if (d.url === undefined && (d.reactions !== undefined || d.comments !== undefined)) {
-    await env.DB.prepare('UPDATE posts SET reactions = ?, comments = ?, updated_at = ? WHERE id = ?').bind(toCount(d.reactions), toCount(d.comments), nowIso(), p.id).run();
+  if (d.url === undefined && (d.reactions !== undefined || d.comments !== undefined || d.impressions !== undefined)) {
+    await env.DB.prepare('UPDATE posts SET reactions = ?, comments = ?, impressions = ?, updated_at = ? WHERE id = ?').bind(toCount(d.reactions), toCount(d.comments), toCount(d.impressions), nowIso(), p.id).run();
     return json({ ok: true });
   }
   let clean;
@@ -426,9 +431,10 @@ async function createPost(request, env) {
   const filename = `${t.slice(0, 10)}_${randomToken(4)}.md`;
   const confirm = Array.isArray(d.confirm) ? d.confirm.map((x) => noEmDash(String(x)).slice(0, 300)).filter((x) => x && text.includes(x)).slice(0, 8) : [];
   const lang = ['he', 'ar', 'ru', 'en'].includes(d.language) ? d.language : 'he';
-  const r = await env.DB.prepare('INSERT INTO posts (persona_slug, filename, topic, platform, goal, body, status, scheduled_for, voice_score, voice_reason, topic_id, confirm_json, medical, language, story_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+  const alternatives = Array.isArray(d.alternatives) ? d.alternatives.map((x) => noEmDash(String(x).trim())).filter(Boolean).slice(0, 2) : [];
+  const r = await env.DB.prepare('INSERT INTO posts (persona_slug, filename, topic, platform, goal, body, status, scheduled_for, voice_score, voice_reason, topic_id, confirm_json, medical, language, story_id, alternatives_json, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
     .bind(persona.slug, filename, String(d.topic || '').slice(0, 300), String(d.platform || ''), String(d.goal || '').slice(0, 300), text, 'draft', d.scheduledFor || null,
-      Number.isInteger(d.voiceScore) ? d.voiceScore : null, d.voiceReason || null, d.topicId || null, JSON.stringify(confirm), d.medical ? 1 : 0, lang, d.storyId || null, t, t).run();
+      Number.isInteger(d.voiceScore) ? d.voiceScore : null, d.voiceReason || null, d.topicId || null, JSON.stringify(confirm), d.medical ? 1 : 0, lang, d.storyId || null, alternatives.length ? JSON.stringify(alternatives) : null, t, t).run();
   if (d.storyId) await env.DB.prepare("UPDATE stories SET status = 'used' WHERE id = ?").bind(d.storyId).run();
   return json({ ok: true, id: r.meta.last_row_id, conflicts: d.scheduledFor ? await scheduleConflicts(env, r.meta.last_row_id) : [] });
 }
@@ -477,6 +483,7 @@ async function updatePost(request, env, id) {
   } else if ('published' in d) { sets.push('published_at = ?'); vals.push(d.published ? (p.published_at || nowIso()) : null); }
   if ('reactions' in d) { sets.push('reactions = ?'); vals.push(toCount(d.reactions)); }
   if ('comments' in d) { sets.push('comments = ?'); vals.push(toCount(d.comments)); }
+  if ('impressions' in d) { sets.push('impressions = ?'); vals.push(toCount(d.impressions)); }
   if ('feedbackNote' in d) { sets.push('feedback_note = ?'); vals.push(noEmDash(String(d.feedbackNote || '')).slice(0, 1000) || null); }
   if ('imageId' in d) {
     if (d.imageId && !(await env.DB.prepare('SELECT 1 FROM assets WHERE id = ? AND consent = 1').bind(d.imageId).first())) fail(400, 'אפשר לצרף רק תמונה שאושרה לשימוש');
@@ -616,7 +623,7 @@ async function topicSave(request, env, id) {
 }
 
 // ---------- settings ----------
-const SETTING_KEYS = ['disclaimer', 'contact_name', 'contact_role', 'contact_email', 'contact_phone', 'link_default_url'];
+const SETTING_KEYS = ['disclaimer', 'contact_name', 'contact_role', 'contact_email', 'contact_phone', 'link_default_url', 'cpm', 'cpc'];
 const SETTING_DEFAULTS = { disclaimer: 'הדעות כאן שלי, ואינן ייעוץ רפואי אישי.' };
 async function getSettings(env) {
   const out = { ...SETTING_DEFAULTS };
@@ -703,7 +710,8 @@ async function report(env, url) {
       SUM(created_at BETWEEN ?1 AND ?2) created, SUM(sent_at BETWEEN ?1 AND ?2) sent, SUM(approved_at BETWEEN ?1 AND ?2) approved,
       SUM(approved_at BETWEEN ?1 AND ?2 AND edited = 1) edited, AVG(CASE WHEN approved_at BETWEEN ?1 AND ?2 THEN edit_ratio END) edit_ratio,
       SUM(published_at BETWEEN ?1 AND ?2) published, SUM(CASE WHEN published_at BETWEEN ?1 AND ?2 THEN reactions END) reactions,
-      SUM(CASE WHEN published_at BETWEEN ?1 AND ?2 THEN comments END) comments FROM posts WHERE persona_slug = ?3`, from, to, p.slug).first();
+      SUM(CASE WHEN published_at BETWEEN ?1 AND ?2 THEN comments END) comments,
+      SUM(CASE WHEN published_at BETWEEN ?1 AND ?2 THEN impressions END) impressions FROM posts WHERE persona_slug = ?3`, from, to, p.slug).first();
     const clicks = (await q('SELECT COUNT(*) n FROM clicks JOIN links ON links.code = clicks.code WHERE links.persona_slug = ? AND clicks.at BETWEEN ? AND ?', p.slug, from, to).first()).n;
     // Six months of edit rate, so the trend of the voice quality is visible.
     const trend = (await q("SELECT substr(approved_at,1,7) m, AVG(edit_ratio) r, COUNT(*) n FROM posts WHERE persona_slug = ? AND approved_at IS NOT NULL AND edit_ratio IS NOT NULL GROUP BY m ORDER BY m DESC LIMIT 6", p.slug).all()).results.reverse();
@@ -711,7 +719,8 @@ async function report(env, url) {
   }
   const candidates = (await q('SELECT COUNT(*) n FROM candidates WHERE submitted_at BETWEEN ? AND ?', from, to).first()).n;
   const stories = (await q('SELECT COUNT(*) n FROM stories WHERE created_at BETWEEN ? AND ?', from, to).first()).n;
-  return json({ month, personas: rows, candidates, stories });
+  const st = await getSettings(env);
+  return json({ month, personas: rows, candidates, stories, rates: { cpm: Number(st.cpm) || 0, cpc: Number(st.cpc) || 0 } });
 }
 
 // Posts that waited three days for approval are surfaced once, so nobody has to remember to look.
@@ -844,6 +853,22 @@ async function admin(request, env, ctx, url) {
     if (m === 'DELETE') { await env.DB.prepare('DELETE FROM stories WHERE id = ?').bind(Number(r[1])).run(); return json({ ok: true }); }
   }
 
+  if ((r = p.match(/^\/api\/personas\/([a-z0-9-]+)\/profile-kit$/))) {
+    if (m === 'POST') {
+      const pf = await personaFull(env, r[1]);
+      if (!pf) fail(404, 'השגריר/ה לא נמצא/ה');
+      const kit = await profileKit(env, pf);
+      await env.DB.prepare('UPDATE personas SET profile_kit_json = ? WHERE slug = ?').bind(JSON.stringify(kit), r[1]).run();
+      return json(kit);
+    }
+    if (m === 'PATCH') {
+      const d = await body(request);
+      const kit = { headline: noEmDash(String(d.headline || '')).slice(0, 300), about: noEmDash(String(d.about || '')).slice(0, 4000), tips: Array.isArray(d.tips) ? d.tips.map((x) => noEmDash(String(x)).slice(0, 300)).slice(0, 8) : [] };
+      await env.DB.prepare('UPDATE personas SET profile_kit_json = ? WHERE slug = ?').bind(JSON.stringify(kit), r[1]).run();
+      return json({ ok: true });
+    }
+  }
+
   // ----- safety check, tracking link, reminders -----
   if ((r = p.match(/^\/api\/posts\/(\d+)\/check$/)) && m === 'POST') return json({ flags: await runSafety(env, Number(r[1])) });
   if ((r = p.match(/^\/api\/posts\/(\d+)\/link$/)) && m === 'POST') {
@@ -852,7 +877,7 @@ async function admin(request, env, ctx, url) {
     let url;
     try { const u = new URL(String(target || '').trim()); if (!/^https?:$/.test(u.protocol)) throw 0; url = u; } catch { fail(400, 'כתובת היעד לא תקינה'); }
     // Campaign tags so the destination's own analytics can count the program too.
-    url.searchParams.set('utm_source', 'ambassadors'); url.searchParams.set('utm_medium', 'social'); url.searchParams.set('utm_content', post.persona_slug);
+    url.searchParams.set('utm_source', 'ambassadors'); url.searchParams.set('utm_medium', 'social'); url.searchParams.set('utm_content', post.persona_slug); url.searchParams.set('utm_campaign', `post-${post.id}`); url.searchParams.set('utm_campaign', `post-${post.id}`);
     const code = post.link_code || randomToken(4);
     if (post.link_code) await env.DB.prepare('UPDATE links SET target_url = ? WHERE code = ?').bind(url.toString(), code).run();
     else {

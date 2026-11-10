@@ -84,6 +84,12 @@ on('/report', async (page) => {
       <div class="body flush tablewrap"><table><thead><tr><th>שגריר/ה</th><th>נשלחו</th><th>אושרו</th><th>עלו</th><th>כניסות</th><th>לייקים ותגובות</th><th>כמה שינו</th><th>מגמה, חצי שנה</th></tr></thead>
       <tbody>${d.personas.map((p) => `<tr><td><div class="t" style="font-weight:600">${esc(p.name)}</div><div class="xs muted">${esc(p.role || '')}</div></td><td>${p.sent}</td><td>${p.approved}</td><td>${p.published}</td><td>${p.clicks}</td><td>${(p.reactions || 0) + (p.comments || 0)}</td><td>${p.approved ? pct(p.edit_ratio) : 'אין עדיין'}</td>
         <td>${p.trend.length ? `<span class="spark" title="${esc(p.trend.map((t) => `${t.m}: ${Math.round(t.r * 100)}%`).join(', '))}">${p.trend.map((t) => `<i style="height:${Math.max(2, Math.round(t.r * 28))}px"></i>`).join('')}</span>` : '<span class="xs muted">אין עדיין</span>'}</td></tr>`).join('')}</tbody></table></div></section>
+    <section class="card" style="margin-top:24px"><header><h2>שווי משוער</h2><p>כמה היה עולה להגיע לאותה חשיפה בפרסום ממומן. זה אומדן בלבד, לפי התעריפים שמוגדרים במסך "הגדרות", ולא נתון מהרשתות.</p></header>
+      <div class="body">${d.rates.cpm || d.rates.cpc ? (() => {
+        const imp = sum('impressions'), clk = sum('clicks');
+        const value = Math.round((imp / 1000) * d.rates.cpm + clk * d.rates.cpc);
+        return `<div class="kpis" style="grid-template-columns:repeat(3,1fr);margin-bottom:0"><div class="kpi"><div class="v">${imp.toLocaleString('he-IL')}</div><div class="l">צפיות שדווחו</div><div class="s">לפי ${d.rates.cpm} ₪ לאלף צפיות</div></div><div class="kpi"><div class="v">${clk.toLocaleString('he-IL')}</div><div class="l">כניסות דרך הקישורים</div><div class="s">לפי ${d.rates.cpc} ₪ לכניסה</div></div><div class="kpi" style="--c:var(--green)"><div class="v">${value.toLocaleString('he-IL')} ₪</div><div class="l">שווי משוער החודש</div><div class="s">צפיות נספרות רק כשמישהו מילא אותן</div></div></div>`;
+      })() : '<p class="small">כדי לראות שווי משוער, צריך להגדיר תעריף לאלף צפיות ותעריף לכניסה במסך <a class="link" href="/settings">הגדרות</a>.</p>'}</div></section>
     <p class="small muted" style="margin-top:16px">ממוצע השינוי לפני אישור החודש: ${pct(avgEdit)}. כניסות נספרות רק מאנשים, לא מתצוגות מקדימות של הרשתות.</p>`;
   $('#pr', page).onclick = () => window.print();
 });
@@ -102,6 +108,10 @@ on('/settings', async (page) => {
       <section class="card"><header><h2>פוסטים</h2></header><div class="body">
         <label class="field" style="margin-top:0"><span>שורת הסתייגות לפוסט רפואי</span><input class="input" data-k="disclaimer" value="${esc(s.disclaimer || '')}"><span class="hint">מוצעת רק כשהפוסט עוסק בנושא רפואי, ולא נוספת בלי שבוחרים בה.</span></label>
         <label class="field"><span>יעד ברירת מחדל לקישורי מעקב</span><input class="input" data-k="link_default_url" dir="ltr" value="${esc(s.link_default_url || '')}" placeholder="https://"><span class="hint">למשל עמוד המשרות של כללית.</span></label>
+      </div></section>
+      <section class="card"><header><h2>תעריפים לשווי משוער</h2><p>הדוח החודשי מחשב כמה היה עולה להגיע לאותה חשיפה בפרסום ממומן. כדאי לקבל את התעריפים ממחלקת השיווק של כללית.</p></header><div class="body">
+        <label class="field" style="margin-top:0"><span>מחיר לאלף צפיות, בשקלים</span><input class="input" data-k="cpm" inputmode="decimal" dir="ltr" value="${esc(s.cpm || '')}"></label>
+        <label class="field"><span>מחיר לכניסה, בשקלים</span><input class="input" data-k="cpc" inputmode="decimal" dir="ltr" value="${esc(s.cpc || '')}"></label>
       </div></section>
     </div>
     <div class="btns" style="margin-top:24px"><button type="button" class="btn" id="sv">${icon('save')}<span>שמירה</span></button></div>`;

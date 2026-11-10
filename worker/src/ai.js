@@ -121,6 +121,7 @@ export async function safetyCheck(env, persona, body, boundaries) {
 - נושא פוליטי, ארגוני או רגיש שעלול לפגוע בעובד/ת או בכללית
 - כל דבר שהעובד/ת ביקש/ה במפורש לא לכתוב בשמו/ה
 - פרט קונקרטי (אירוע, מספר, ציטוט) שלא מופיע בחומר של העובד/ת
+הרקע המשפטי: חוק זכויות החולה וחוק הגנת הפרטיות בישראל, וכללי האתיקה של משרד הבריאות ושל ההסתדרות הרפואית. אין צורך לצטט סעיפים, רק להצביע על הסיכון.
 אם אין בעיה, מחזירים רשימה ריקה. לא מחפשים בעיות סגנון. אסור מקף ארוך.`,
     messages: [{
       role: 'user',
@@ -283,4 +284,28 @@ export async function voiceLesson(env, persona, original, edited) {
     }],
   });
   return textOf(response);
+}
+
+const Kit = z.object({
+  headline: z.string().describe('A LinkedIn headline in the person\'s language and voice, up to 120 characters, true to the profile only'),
+  about: z.string().describe('A LinkedIn About section in first person, 80 to 160 words, in their voice, only facts from the profile'),
+  tips: z.array(z.string()).describe('3 to 5 short practical tips for this person\'s profile and posting, in Hebrew'),
+});
+
+// A suggested network profile, so posts land on a profile that looks like the same person.
+// Drafted for the operator and the ambassador to edit; nothing is changed on any network.
+export async function profileKit(env, persona) {
+  const response = await client(env).messages.parse({
+    model: MODEL,
+    max_tokens: 8000,
+    output_config: { effort: 'medium', format: zodOutputFormat(Kit) },
+    system: `אתה עוזר לעובד/ת של שירותי בריאות כללית לסדר את הפרופיל שלו/ה בלינקדאין, כדי שהפוסטים שמתפרסמים בשמו/ה יגיעו לפרופיל שנראה מקצועי ואמין.
+כללים: רק עובדות מהפרופיל, בלי להמציא תארים, שנים או הישגים. בקול של האדם, לא בשפה שיווקית. אסור מקף ארוך.
+בפרופיל של איש/אשת צוות רפואי כדאי שתופיע הבהרה קצרה שהדעות אישיות ואינן ייעוץ רפואי.`,
+    messages: [{ role: 'user', content: `שפת הכתיבה: ${LANGS[persona.language] || 'עברית'}\n\nהפרופיל של ${persona.name}:\n${persona.profile_md}` }],
+  });
+  check(response);
+  const k = response.parsed_output;
+  if (!k) throw new Error('התקבל פלט לא תקין ממודל ה-AI');
+  return { headline: noEmDash(k.headline), about: noEmDash(k.about), tips: (k.tips || []).map(noEmDash).slice(0, 5) };
 }

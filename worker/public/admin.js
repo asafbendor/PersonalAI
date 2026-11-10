@@ -121,10 +121,10 @@ on('/personas/([a-z0-9-]+)', async (page, slug) => {
   const draw = () => {
     page.innerHTML = crumb('/personas', 'כל השגרירים') + `<div class="head"><div class="hero">${photo(p)}<div><h1>${esc(p.name)}</h1><p>${esc([p.role, p.company].filter(Boolean).join(' · '))}</p>${p.personalityWords ? `<p style="color:var(--teal);margin-top:4px">${esc(p.personalityWords)}</p>` : ''}</div></div>
       <div class="actions"><a class="btn" href="/generate?personas=${slug}">${icon('sparkles')}<span>פוסט חדש</span></a></div></div>
-      <div class="tabs" role="tablist">${[['posts', `פוסטים (${p.posts.length})`], ['stories', 'סיפורים'], ['profile', 'פרופיל הקול'], ['samples', `דוגמאות כתיבה (${p.samples.length})`], ['media', 'פרטים ותמונה']].map(([k, l]) => `<button type="button" role="tab" aria-selected="${tab === k}" class="${tab === k ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div>
+      <div class="tabs" role="tablist">${[['posts', `פוסטים (${p.posts.length})`], ['stories', 'סיפורים'], ['network', 'פרופיל ברשת'], ['profile', 'פרופיל הקול'], ['samples', `דוגמאות כתיבה (${p.samples.length})`], ['media', 'פרטים ותמונה']].map(([k, l]) => `<button type="button" role="tab" aria-selected="${tab === k}" class="${tab === k ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div>
       <div id="tab"></div>`;
     $$('[data-tab]', page).forEach((b) => { b.onclick = () => { tab = b.dataset.tab; history.replaceState(null, '', `?tab=${tab}`); draw(); }; });
-    ({ posts: postsTab, stories: storiesTab, profile: profileTab, samples: samplesTab, media: mediaTab })[tab]($('#tab', page), p, reload);
+    ({ posts: postsTab, stories: storiesTab, network: networkTab, profile: profileTab, samples: samplesTab, media: mediaTab })[tab]($('#tab', page), p, reload);
   };
   const reload = async () => { Object.assign(p, await api(`/personas/${slug}`)); draw(); };
   document.title = `${p.name} · שגרירי כללית`;
@@ -134,13 +134,13 @@ on('/personas/([a-z0-9-]+)', async (page, slug) => {
 function postsTab(el, p, reload) {
   if (!p.posts.length) { el.innerHTML = `<div class="card"><div class="empty">עוד אין פוסטים. <a class="link" href="/generate?personas=${p.slug}">ליצירת הפוסט הראשון</a></div></div>`; return; }
   el.innerHTML = p.posts.map((x) => `<article class="post" data-id="${x.id}">
-    <header><div class="t">${esc(x.topic || 'בלי נושא')}</div>${statusChip(x)}${x.platform ? `<span class="chip plain">${esc(x.platform)}</span>` : ''}${x.language !== 'he' ? `<span class="chip plain">${LANG_NAMES[x.language] || ''}</span>` : ''}${x.edited ? `<span class="chip info">נערך ע"י השגריר/ה${x.editRatio != null ? ` · שונה ${Math.round(x.editRatio * 100)}%` : ''}</span>` : ''}${x.status === 'approved' && !x.edited ? '<span class="chip ok">אושר בלי שינוי</span>' : ''}${x.voiceScore ? `<span class="chip plain">דומה לקול: ${x.voiceScore} מתוך 10</span>` : ''}${x.trackUrl ? `<span class="chip published">${x.clicks || 0} כניסות דרך הקישור</span>` : ''}
+    <header><div class="t">${esc(x.topic || 'בלי נושא')}</div>${statusChip(x)}${x.platform ? `<span class="chip plain">${esc(x.platform)}</span>` : ''}${x.language !== 'he' ? `<span class="chip plain">${LANG_NAMES[x.language] || ''}</span>` : ''}${x.edited ? `<span class="chip info">נערך ע"י השגריר/ה${x.editRatio != null ? ` · שונה ${Math.round(x.editRatio * 100)}%` : ''}</span>` : ''}${x.status === 'approved' && !x.edited ? '<span class="chip ok">אושר בלי שינוי</span>' : ''}${x.voiceScore ? `<span class="chip plain">דומה לקול: ${x.voiceScore} מתוך 10</span>` : ''}${x.trackUrl ? `<span class="chip published">${x.clicks || 0} כניסות דרך הקישור</span>` : ''}${x.alternatives?.length && x.status !== 'approved' ? `<span class="chip plain">${x.alternatives.length + 1} גרסאות לבחירת השגריר/ה</span>` : ''}
       <span class="xs muted" style="margin-inline-start:auto">נוצר ${fmtDate(x.createdAt)}${x.scheduledFor ? ` · מתוזמן ל${fmtDate(x.scheduledFor)}` : ''}</span></header>
     <div class="text">${esc(x.body)}</div>
     ${x.originalBody ? `<details style="margin:0 20px 16px"><summary class="link" style="cursor:pointer">מה המערכת כתבה במקור</summary><div class="orig" style="margin:10px 0 0">${esc(x.originalBody)}</div></details>` : ''}
     ${x.confirm?.length && x.status !== 'approved' ? `<div style="margin:0 20px 16px" class="warnbox"><b>פרטים שהשגריר/ה יתבקש/תתבקש לאשר</b> (לא הגיעו מהחומר שלו/ה):<ul class="confirm">${x.confirm.map((c) => `<li>"${esc(c)}"</li>`).join('')}</ul></div>` : ''}
     ${x.safety && x.status !== 'approved' ? `<div style="margin:0 20px 16px">${x.safetyStale ? '<p class="xs muted" style="margin-bottom:6px">הטקסט השתנה מאז הבדיקה האחרונה.</p>' : ''}${flagsHtml(x.safety)}</div>` : ''}
-    ${x.reactions != null || x.comments != null || x.feedbackNote ? `<p class="small" style="margin:0 20px 16px">${icon('star', 'sm')} ${x.reactions ?? 0} לייקים · ${x.comments ?? 0} תגובות${x.feedbackNote ? ` · ${esc(x.feedbackNote)}` : ''}</p>` : ''}
+    ${x.reactions != null || x.comments != null || x.impressions != null || x.feedbackNote ? `<p class="small" style="margin:0 20px 16px">${icon('star', 'sm')} ${x.impressions != null ? `${x.impressions} צפיות · ` : ''}${x.reactions ?? 0} לייקים · ${x.comments ?? 0} תגובות${x.feedbackNote ? ` · ${esc(x.feedbackNote)}` : ''}</p>` : ''}
     <footer>
       <div class="btns">
         <button type="button" class="btn sm ghost" data-copy>${icon('copy', 'sm')}<span>העתקה</span></button>
@@ -203,7 +203,8 @@ function postsTab(el, p, reload) {
     q('[data-feedback]')?.addEventListener('click', async () => {
       const v = await modal({ title: 'איך הפוסט הלך', narrow: true, body: `<p class="small muted">מספרים מהרשת, לפי מה שרואים בפוסט. השגריר/ה רואה אותם גם בעמוד האישור, ויכול/ה לעדכן בעצמו/ה.</p>
         <div class="grid g2" style="gap:0 16px"><label class="field"><span>לייקים ותגובות רגש</span><input class="input" type="number" min="0" id="rx" value="${x.reactions ?? ''}"></label><label class="field"><span>תגובות כתובות</span><input class="input" type="number" min="0" id="cm" value="${x.comments ?? ''}"></label></div>
-        <label class="field"><span>הערה (לא חובה)</span><input class="input" id="fn" value="${esc(x.feedbackNote || '')}" placeholder="למשל: שלוש פניות על משרות"></label>`, actions: [{ label: 'ביטול', cls: 'ghost', value: null }, { label: 'שמירה', collect: (m) => ({ reactions: $('#rx', m).value, comments: $('#cm', m).value, feedbackNote: $('#fn', m).value }) }] });
+        <label class="field"><span>צפיות</span><input class="input" type="number" min="0" id="im" value="${x.impressions ?? ''}"><span class="hint">בלינקדאין רואים את המספר מתחת לפוסט. משמש לאומדן השווי בדוח החודשי.</span></label>
+        <label class="field"><span>הערה (לא חובה)</span><input class="input" id="fn" value="${esc(x.feedbackNote || '')}" placeholder="למשל: שלוש פניות על משרות"></label>`, actions: [{ label: 'ביטול', cls: 'ghost', value: null }, { label: 'שמירה', collect: (m) => ({ reactions: $('#rx', m).value, comments: $('#cm', m).value, impressions: $('#im', m).value, feedbackNote: $('#fn', m).value }) }] });
       if (!v) return;
       try { await api(`/posts/${x.id}`, { method: 'PATCH', body: v }); toast('נשמר'); await reload(); } catch (e) { toast(e.message, 'circle-alert'); }
     });
@@ -252,6 +253,45 @@ function storiesTab(el, p, reload) {
     $$('[data-arch]', el).forEach((b) => { b.onclick = async () => { await api(`/stories/${b.dataset.arch}`, { method: 'PATCH', body: { status: 'archived' } }); storiesTab(el, p, reload); }; });
     $$('[data-sdel]', el).forEach((b) => { b.onclick = async () => { if (!(await confirmDanger('למחוק את הסיפור?', 'הסיפור יימחק מהמערכת. אי אפשר לבטל.', 'מחיקה'))) return; await api(`/stories/${b.dataset.sdel}`, { method: 'DELETE' }); storiesTab(el, p, reload); }; });
   }).catch((e) => { el.innerHTML = `<div class="err">${esc(e.message)}</div>`; });
+}
+
+// The rules every ambassador gets once, before the first post. Plain words, healthcare-specific.
+const GUIDELINES = `כמה כללים קצרים לשגרירי כללית ברשתות:
+1. בלי שום פרט שמזהה מטופל: לא שם, לא גיל, לא תמונה, לא סיפור שאפשר לזהות. גם לא "בלי שמות" על מקרה נדיר.
+2. בלי ייעוץ רפואי אישי ברשת. מי ששואל, מפנים לרופא/ה או למוקד של כללית, ${String.fromCharCode(0x200e)}*2700${String.fromCharCode(0x200e)}.
+3. בלי צילום בתוך מחלקה או מרפאה כשרואים מטופלים, מסכים או מסמכים.
+4. הדעות שלך הן שלך. בפוסט רפואי כדאי להוסיף: "הדעות כאן שלי, ואינן ייעוץ רפואי אישי".
+5. תגובה שלילית או שאלה רגישה: לא להיגרר, אפשר להעביר אלינו.
+6. שום פוסט לא עולה בשמך בלי שאישרת אותו.`;
+
+function networkTab(el, p, reload) {
+  const k = p.profileKit;
+  el.innerHTML = `<div class="grid g2">
+    <section class="card"><header><h2>הצעה לפרופיל בלינקדאין</h2><p>כותרת ותקציר בקול של ${esc(p.name)}, רק מעובדות שבפרופיל הקול. כך הפוסטים מגיעים לפרופיל שנראה אמין ומקצועי. שום דבר לא משתנה ברשת: זו הצעה שהשגריר/ה מעתיק/ה בעצמו/ה.</p></header>
+      <div class="body">${k ? `<label class="field" style="margin-top:0"><span>כותרת (Headline)</span><textarea class="textarea" id="kh" rows="2" style="min-height:0">${esc(k.headline)}</textarea></label>
+        <label class="field"><span>תקציר (About)</span><textarea class="textarea" id="ka" rows="8">${esc(k.about)}</textarea></label>
+        ${k.tips?.length ? `<div class="note" style="margin-top:16px">${icon('info')}<div><b>טיפים לפרופיל</b><ul class="confirm">${k.tips.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></div></div>` : ''}
+        <div class="btns" style="margin-top:16px"><button type="button" class="btn" id="ks">${icon('save')}<span>שמירה</span></button><button type="button" class="btn ghost" id="kc">${icon('copy')}<span>העתקה</span></button><a class="btn go" id="kw" target="_blank" rel="noopener noreferrer">${icon('send')}<span>שליחה בוואטסאפ</span></a><button type="button" class="btn ghost" id="kg">${icon('refresh-cw')}<span>הצעה חדשה</span></button></div>`
+        : `<button type="button" class="btn" id="kg">${icon('wand-sparkles')}<span>כתיבת הצעה לפרופיל</span></button>`}</div></section>
+    <section class="card"><header><h2>כללים לשגריר/ה</h2><p>לשלוח פעם אחת, לפני הפוסט הראשון.</p></header>
+      <div class="body"><textarea class="textarea" id="gl" rows="11" aria-label="כללים לשגריר/ה">${esc(GUIDELINES)}</textarea>
+      <div class="btns" style="margin-top:16px"><a class="btn go" id="gw" target="_blank" rel="noopener noreferrer">${icon('send')}<span>שליחה בוואטסאפ</span></a><button type="button" class="btn ghost" id="gc">${icon('copy')}<span>העתקה</span></button></div></div></section>
+  </div>`;
+  const kitText = () => `היי ${firstName(p.name)}, הצעה לפרופיל שלך בלינקדאין, אפשר לשנות כל מה שתרצה/י:\n\nכותרת:\n${$('#kh', el).value}\n\nתקציר:\n${$('#ka', el).value}`;
+  const sync = () => { if ($('#kw', el)) $('#kw', el).href = waUrl(p.phone, kitText()); $('#gw', el).href = waUrl(p.phone, $('#gl', el).value); };
+  sync();
+  el.addEventListener('input', sync);
+  $('#gc', el).onclick = async () => { if (await copyText($('#gl', el).value)) toast('הועתק'); };
+  $('#kc', el)?.addEventListener('click', async () => { if (await copyText(kitText())) toast('הועתק'); });
+  $('#kg', el).onclick = async (e) => {
+    busy(e.currentTarget, true, 'כותב הצעה...');
+    try { await api(`/personas/${p.slug}/profile-kit`, { method: 'POST' }); await reload(); } catch (er) { toast(er.message, 'circle-alert'); busy(e.currentTarget, false); }
+  };
+  $('#ks', el)?.addEventListener('click', async (e) => {
+    busy(e.currentTarget, true, 'שומר...');
+    try { await api(`/personas/${p.slug}/profile-kit`, { method: 'PATCH', body: { headline: $('#kh', el).value, about: $('#ka', el).value, tips: k.tips } }); toast('נשמר'); } catch (er) { toast(er.message, 'circle-alert'); }
+    busy(e.currentTarget, false);
+  });
 }
 
 function profileTab(el, p, reload) {
@@ -364,6 +404,7 @@ function showResults(out, results, req, settings) {
       <div data-unv></div>
       <label class="field" style="margin-top:0"><span>הנוסח שנבחר (אפשר לערוך)</span><textarea class="textarea tall" data-text></textarea></label>
       <label data-disc style="display:none;margin-top:12px;align-items:center;gap:10px;min-height:48px;cursor:pointer"><input type="checkbox" data-disccb style="width:20px;height:20px;accent-color:var(--teal)"><span>להוסיף שורת הסתייגות בסוף: "${esc(disclaimer)}"<span class="xs muted" style="display:block">הפוסט עוסק בנושא רפואי.</span></span></label>
+      <label style="display:flex;margin-top:12px;align-items:center;gap:10px;min-height:48px;cursor:pointer"><input type="checkbox" data-alts style="width:20px;height:20px;accent-color:var(--teal)"><span>לתת לשגריר/ה לבחור בין שלוש הגרסאות<span class="xs muted" style="display:block">הנוסח שבחרת יופיע ראשון, והשניים האחרים כאפשרות בעמוד האישור.</span></span></label>
       <label class="field" style="max-width:260px"><span>תאריך פרסום מתוכנן (לא חובה)</span><input class="input" type="date" data-date></label>
       <div class="btns" style="margin-top:16px"><button type="button" class="btn" data-save>${icon('save')}<span>שמירה כטיוטה</span></button><button type="button" class="btn ghost" data-savesend>${icon('send')}<span>שמירה ושליחה לאישור</span></button><button type="button" class="btn ghost" data-copy>${icon('copy')}<span>העתקה</span></button></div></div>`}
   </div></section>`).join('');
@@ -391,7 +432,7 @@ function showResults(out, results, req, settings) {
       const v = r.variants[chosen];
       const text = finalText();
       try {
-        const { id, conflicts } = await api('/posts', { body: { personaSlug: r.slug, topic: req.topic, platform: req.platform, goal: req.angle, body: text, scheduledFor: $('[data-date]', sec).value || null, voiceScore: v.score || null, voiceReason: v.reason || null, topicId: req.topicId, confirm: (v.unverified || []).filter((u) => text.includes(u)), medical: v.medical, language: r.language, storyId: req.storyId } });
+        const { id, conflicts } = await api('/posts', { body: { personaSlug: r.slug, topic: req.topic, platform: req.platform, goal: req.angle, body: text, scheduledFor: $('[data-date]', sec).value || null, voiceScore: v.score || null, voiceReason: v.reason || null, topicId: req.topicId, confirm: (v.unverified || []).filter((u) => text.includes(u)), medical: v.medical, language: r.language, storyId: req.storyId, alternatives: $('[data-alts]', sec).checked ? r.variants.filter((_, i) => i !== chosen).map((o) => o.text) : [] } });
         conflictWarn(conflicts);
         busy(btn, true, 'בודק בטיחות...');
         const { flags } = await api(`/posts/${id}/check`, { method: 'POST' }).catch(() => ({ flags: null }));
