@@ -79,6 +79,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .note.warn { border-color: var(--warn); background: var(--warn-bg); } .note.warn .ico { color: var(--warn); }
 .err { padding: 12px 14px; border: 1px solid var(--danger); background: var(--danger-bg); font-size: 14.5px; margin-top: 16px; }
 .err:empty { display: none; }
+#pwhint { font-size: 13.5px; color: var(--g600); margin-top: 8px; }
+#pwhint:empty { display: none; }
 
 /* ---------- brand header block (public pages and login) ---------- */
 .brandhead { background: var(--teal); color: #fff; padding: 28px 24px 30px; }

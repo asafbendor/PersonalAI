@@ -156,6 +156,27 @@ async function bump(env, key, windowMs, max, lockMs) {
   return { count, locked };
 }
 
+// ---------- password typing slips ----------
+// The usual reasons a correct password fails: the keyboard was on Hebrew, Caps Lock or the
+// phone capitalized the first letter, or a space slipped in. All of these are forgiven, so the
+// login does not lock someone out for typing the right word the wrong way.
+const HEB_TO_LATIN = {
+  '/': 'q', "'": 'w', 'ק': 'e', 'ר': 'r', 'א': 't', 'ט': 'y', 'ו': 'u', 'ן': 'i', 'ם': 'o', 'פ': 'p',
+  'ש': 'a', 'ד': 's', 'ג': 'd', 'כ': 'f', 'ע': 'g', 'י': 'h', 'ח': 'j', 'ל': 'k', 'ך': 'l', 'ף': ';',
+  'ז': 'z', 'ס': 'x', 'ב': 'c', 'ה': 'v', 'נ': 'b', 'מ': 'n', 'צ': 'm', 'ת': ',', 'ץ': '.',
+};
+const hebrewKeys = (s) => /[\u0590-\u05FF]/.test(s) ? [...s].map((ch) => HEB_TO_LATIN[ch] ?? ch).join('') : s;
+async function passwordMatches(input, password) {
+  const raw = String(input || '');
+  const trimmed = raw.trim();
+  const tries = [...new Set([raw, trimmed, hebrewKeys(trimmed)])];
+  for (const t of tries) {
+    if (await safeEqual(t, password)) return true;
+    if (await safeEqual(t.toLowerCase(), String(password).toLowerCase())) return true;
+  }
+  return false;
+}
+
 // ---------- session ----------
 // The cookie carries an expiry and a signature, never the password. The signature covers a
 // digest of the current password, so changing the password signs everyone out.
@@ -186,7 +207,7 @@ async function login(request, env) {
   }
   const { password } = await body(request);
   if (!env.DASHBOARD_PASSWORD) return bad('לא הוגדרה סיסמה לאתר', 500);
-  if (!(await safeEqual(password || '', env.DASHBOARD_PASSWORD))) {
+  if (!(await passwordMatches(password, env.DASHBOARD_PASSWORD))) {
     const { count, locked } = await bump(env, key, LOGIN_LOCK_MS, LOGIN_MAX, LOGIN_LOCK_MS);
     if (locked) return bad('יותר מדי ניסיונות שגויים. הכניסה ננעלה ל-15 דקות', 429);
     return bad(`הסיסמה שגויה. נשארו ${LOGIN_MAX - count} ניסיונות לפני נעילה`, 401);
