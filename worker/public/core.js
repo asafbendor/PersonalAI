@@ -212,8 +212,9 @@ on('/login', (root) => {
         <p class="lead">המערכת מיועדת לצוות שמנהל את שגרירי כללית: שאלונים, פרופילים, פוסטים ואישורים.</p>
         <form id="f" novalidate>
           <label class="field"><span>סיסמה</span>
-            <div class="pw"><input class="input" id="pw" type="password" autocomplete="current-password" required><button type="button" id="eye" aria-label="הצגת הסיסמה">${icon('eye')}</button></div>
+            <div class="pw"><input class="input" id="pw" type="password" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false" dir="ltr" required><button type="button" id="eye" aria-label="הצגת הסיסמה">${icon('eye')}</button></div>
           </label>
+          <div class="hint" id="pwhint" aria-live="polite"></div>
           <div class="err" id="err" role="alert"></div>
           <button class="btn" type="submit" id="go">כניסה</button>
         </form>
@@ -223,6 +224,13 @@ on('/login', (root) => {
     </div>
   </div>`;
   $('#eye').onclick = () => { const p = $('#pw'); const show = p.type === 'password'; p.type = show ? 'text' : 'password'; $('#eye').innerHTML = icon(show ? 'eye-off' : 'eye'); $('#eye').setAttribute('aria-label', show ? 'הסתרת הסיסמה' : 'הצגת הסיסמה'); };
+  const pwHint = (e) => {
+    const v = $('#pw').value;
+    const caps = e && e.getModifierState && e.getModifierState('CapsLock');
+    $('#pwhint').textContent = /[\u0590-\u05FF]/.test(v) ? 'שים לב: המקלדת בעברית. זה בסדר, המערכת תבין.' : caps ? 'שים לב: Caps Lock דולק. זה בסדר, המערכת תבין.' : '';
+  };
+  $('#pw').addEventListener('input', pwHint);
+  $('#pw').addEventListener('keyup', pwHint);
   $('#f').onsubmit = async (e) => {
     e.preventDefault();
     $('#err').textContent = '';
